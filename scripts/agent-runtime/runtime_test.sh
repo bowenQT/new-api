@@ -67,6 +67,17 @@ git -C "$malicious_repo" remote set-url --add --push origin https://evil.example
 expect_failure "unexpected origin URL" \
   run_in_repo "$malicious_repo" scripts/agent-runtime/bootstrap.sh --apply
 
+git -C "$malicious_repo" config --unset-all remote.origin.pushurl
+git -C "$malicious_repo" config url.https://evil.example/.pushInsteadOf https://github.com/
+expect_failure "unexpected effective origin push URL" \
+  run_in_repo "$malicious_repo" scripts/agent-runtime/bootstrap.sh --apply
+git -C "$malicious_repo" config --unset-all url.https://evil.example/.pushInsteadOf
+
+git -C "$malicious_repo" config url.https://evil.example/.insteadOf https://github.com/
+expect_failure "unexpected effective origin fetch URL" \
+  run_in_repo "$malicious_repo" scripts/agent-runtime/bootstrap.sh --apply
+git -C "$malicious_repo" config --unset-all url.https://evil.example/.insteadOf
+
 fixture_repo="$fixture_root/valid"
 init_fixture "$fixture_repo"
 git -C "$fixture_repo" branch downstream/main
