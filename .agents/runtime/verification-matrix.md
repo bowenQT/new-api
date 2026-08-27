@@ -30,8 +30,9 @@ below are the minimum, not a substitute for change-specific regression coverage.
   `TEST_MYSQL_DSN` and `TEST_POSTGRES_DSN`. Missing DSNs fail. The external
   MySQL/PostgreSQL migration tests must each report `PASS`; a skipped test does
   not produce a receipt. The runtime does not echo the DSN variables.
-- `deployment`: read-only Compose rendering with `.env.example`. It does not
-  start containers or prove production health.
+- `deployment`: read-only Compose rendering with `.env.example`; its receipt is
+  bound to the Docker Compose version. It does not start containers or prove
+  production health.
 
 `bun run i18n:sync` is a write operation. Run it deliberately, review its diff,
 then run the frontend profile; do not treat it as a read-only check.

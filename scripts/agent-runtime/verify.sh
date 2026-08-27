@@ -321,8 +321,9 @@ receipt_unique=${receipt_tmp##*.verification.}
 receipt_path="$receipt_dir/${finished_at//[:]/-}-${head_start:0:12}-$profile-$evidence_scope-$receipt_unique.receipt"
 go_version=$(runtime_profile_go_version "$profile")
 bun_version=$(runtime_profile_bun_version "$profile")
+docker_compose_version=$(runtime_profile_docker_compose_version "$profile")
 {
-  printf 'schema_version\t1\n'
+  printf 'schema_version\t2\n'
   printf 'result\tpassed\n'
   printf 'scope\t%s\n' "$evidence_scope"
   printf 'profile\t%s\n' "$profile"
@@ -334,6 +335,7 @@ bun_version=$(runtime_profile_bun_version "$profile")
   printf 'git_version\t%s\n' "$(git version)"
   printf 'go_version\t%s\n' "$go_version"
   printf 'bun_version\t%s\n' "$bun_version"
+  printf 'docker_compose_version\t%s\n' "$docker_compose_version"
 } > "$receipt_tmp"
 mv "$receipt_tmp" "$receipt_path"
 receipt_tmp=""

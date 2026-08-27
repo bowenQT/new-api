@@ -39,6 +39,26 @@ runtime_require_go_test_pass_event "$test_events" 'TestDatabaseContract/mysql'
 expect_failure "required Go test did not pass" \
   runtime_require_go_test_pass_event "$test_events" 'TestDatabaseContract/postgres'
 
+fake_bin="$fixture_root/fake-bin"
+mkdir -p "$fake_bin"
+printf '%s\n' '#!/usr/bin/env bash' 'printf "Docker Compose version v9.9.9-test\\n"' > "$fake_bin/docker"
+chmod +x "$fake_bin/docker"
+if [[ "$(PATH="$fake_bin:$PATH" runtime_profile_docker_compose_version deployment)" != "Docker Compose version v9.9.9-test" ]]; then
+  echo "ERROR: deployment toolchain version was not captured" >&2
+  exit 1
+fi
+if [[ "$(runtime_profile_docker_compose_version docs)" != "not-run" ]]; then
+  echo "ERROR: non-deployment profile unexpectedly captured Docker Compose" >&2
+  exit 1
+fi
+
+runtime_validate_pr_delivery_state OPEN MERGEABLE CLEAN NONE
+expect_failure "PR protection state is BLOCKED" \
+  runtime_validate_pr_delivery_state OPEN MERGEABLE BLOCKED NONE
+expect_failure "PR review decision is CHANGES_REQUESTED" \
+  runtime_validate_pr_delivery_state OPEN MERGEABLE CLEAN CHANGES_REQUESTED
+runtime_validate_pr_delivery_state MERGED UNKNOWN UNKNOWN CHANGES_REQUESTED
+
 run_in_repo() {
   local repo_path=$1
   shift
@@ -92,6 +112,19 @@ git -C "$malicious_repo" config --unset-all url.https://evil.example/.insteadOf
 fixture_repo="$fixture_root/valid"
 init_fixture "$fixture_repo"
 git -C "$fixture_repo" branch downstream/main
+git -C "$fixture_repo" switch --quiet downstream/main
+printf 'downstream-only\n' > "$fixture_repo/downstream.txt"
+git -C "$fixture_repo" add downstream.txt
+git -C "$fixture_repo" commit --quiet -m downstream
+git -C "$fixture_repo" switch --quiet -c feature/stale-downstream
+printf 'stale-topic\n' > "$fixture_repo/stale-topic.txt"
+git -C "$fixture_repo" add stale-topic.txt
+git -C "$fixture_repo" commit --quiet -m stale-topic
+git -C "$fixture_repo" switch --quiet downstream/main
+printf 'downstream-later\n' > "$fixture_repo/downstream-later.txt"
+git -C "$fixture_repo" add downstream-later.txt
+git -C "$fixture_repo" commit --quiet -m downstream-later
+git -C "$fixture_repo" switch --quiet main
 git -C "$fixture_repo" update-ref refs/remotes/origin/main refs/heads/main
 git -C "$fixture_repo" update-ref refs/remotes/upstream/main refs/heads/main
 git -C "$fixture_repo" update-ref refs/remotes/origin/downstream/main refs/heads/downstream/main
@@ -102,14 +135,47 @@ git -C "$fixture_repo" update-ref refs/remotes/origin/downstream/main refs/heads
 )
 
 git -C "$fixture_repo" switch --quiet downstream/main
-expect_failure "edit mode requires a feature or maintenance branch" \
+expect_failure "edit mode requires a symbolic topic branch" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/preflight.sh --mode edit
+
+git -C "$fixture_repo" switch --quiet --detach
+expect_failure "edit mode requires a symbolic topic branch" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/preflight.sh --mode edit
+git -C "$fixture_repo" switch --quiet downstream/main
 
 git -C "$fixture_repo" switch --quiet -c feature/runtime-test
 printf 'placeholder\n' > "$fixture_repo/.env"
 expect_failure "ignored credential/data artifact" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/preflight.sh --mode edit
 rm -f "$fixture_repo/.env"
+run_in_repo "$fixture_repo" scripts/agent-runtime/preflight.sh --mode edit >/dev/null
+expect_failure "contains downstream-only history" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/preflight.sh --mode upstream-edit
+
+git -C "$fixture_repo" switch --quiet main
+git -C "$fixture_repo" switch --quiet -c feature/upstream-test
+expect_failure "does not descend from origin/downstream/main" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/preflight.sh --mode edit
+run_in_repo "$fixture_repo" scripts/agent-runtime/preflight.sh --mode upstream-edit >/dev/null
+
+git -C "$fixture_repo" switch --quiet feature/stale-downstream
+expect_failure "contains downstream-only history" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/preflight.sh --mode upstream-edit
+git -C "$fixture_repo" switch --quiet feature/runtime-test
+
+git -C "$fixture_repo" update-ref -d refs/remotes/origin/downstream/main
+expect_failure "edit mode requires origin/downstream/main" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/preflight.sh --mode edit
+expect_failure "upstream-edit mode requires origin/downstream/main" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/preflight.sh --mode upstream-edit
+git -C "$fixture_repo" update-ref refs/remotes/origin/downstream/main refs/heads/downstream/main
+
+unrelated_commit=$(git -C "$fixture_repo" commit-tree "$(git -C "$fixture_repo" rev-parse HEAD^{tree})" -m unrelated)
+git -C "$fixture_repo" branch feature/unrelated "$unrelated_commit"
+git -C "$fixture_repo" switch --quiet feature/unrelated
+expect_failure "does not descend from origin/downstream/main" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/preflight.sh --mode edit
+git -C "$fixture_repo" switch --quiet feature/runtime-test
 
 printf 'dirty\n' >> "$fixture_repo/README.md"
 expect_failure "sync mode requires a clean worktree" \

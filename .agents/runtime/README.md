@@ -19,9 +19,11 @@ stale statement and report the discrepancy.
 
 ## Runtime entry flow
 
-1. Run `scripts/agent-runtime/preflight.sh --mode edit` before changing files.
-   Use `--mode read-only` for inspection and `--mode sync --fetch` for upstream
-   work. Edit mode refuses the stable `main` branches even when clean.
+1. Run `scripts/agent-runtime/preflight.sh --mode edit` before downstream
+   implementation. Use `--mode upstream-edit --fetch` for an upstream-only
+   contribution, `--mode read-only` for inspection, and `--mode sync --fetch`
+   for upstream synchronization. Edit modes require a symbolic topic branch and
+   the correct base history; they refuse stable branches even when clean.
 2. Classify the task as S1, S2, or S3 below.
 3. Read the owning code, tests, nested rules, and relevant runbook before planning.
 4. For S2/S3 work, fill `.agents/runtime/task-envelope.md` in the task/PR notes.
@@ -88,7 +90,9 @@ common directory (`.git/agent-runtime/receipts`), so evidence is local and canno
 be committed accidentally. `scripts/agent-runtime/closeout.sh` consumes a receipt
 and revalidates its exact HEAD, profile, workspace, dependency, and toolchain
 fingerprints. With `--pr`, it also requires the exact PR head, `downstream/main`
-base, non-draft mergeability, and current passing checks.
+base, non-draft mergeability, clean branch-protection state, and current passing
+checks. Deployment receipts additionally bind to the exact Docker Compose
+version that rendered the configuration.
 
 - Default verification requires a clean worktree and therefore binds to exact
   `HEAD`.

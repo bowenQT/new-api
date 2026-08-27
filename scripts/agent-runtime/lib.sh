@@ -48,6 +48,18 @@ runtime_profile_bun_version() {
   esac
 }
 
+runtime_profile_docker_compose_version() {
+  local profile=$1
+  case "$profile" in
+    deployment)
+      docker compose version
+      ;;
+    *)
+      printf 'not-run\n'
+      ;;
+  esac
+}
+
 runtime_receipt_value() {
   local receipt_path=$1
   local key=$2
@@ -74,6 +86,33 @@ runtime_require_go_test_pass_event() {
     END { exit passed ? 0 : 1 }
   ' "$events_path"; then
     echo "ERROR: required Go test did not pass (a skip is not sufficient): $test_name" >&2
+    return 1
+  fi
+}
+
+runtime_validate_pr_delivery_state() {
+  local pr_state=$1
+  local pr_mergeable=$2
+  local pr_merge_state=$3
+  local pr_review_decision=$4
+
+  if [[ "$pr_state" == "MERGED" ]]; then
+    return
+  fi
+  if [[ "$pr_state" != "OPEN" ]]; then
+    echo "ERROR: PR state is $pr_state" >&2
+    return 1
+  fi
+  if [[ "$pr_mergeable" != "MERGEABLE" ]]; then
+    echo "ERROR: PR mergeability is $pr_mergeable" >&2
+    return 1
+  fi
+  if [[ "$pr_merge_state" != "CLEAN" ]]; then
+    echo "ERROR: PR protection state is $pr_merge_state" >&2
+    return 1
+  fi
+  if [[ "$pr_review_decision" == "CHANGES_REQUESTED" ]]; then
+    echo "ERROR: PR review decision is CHANGES_REQUESTED" >&2
     return 1
   fi
 }

@@ -30,7 +30,9 @@ downstream/main ───────────── integration and release 
   GitHub default base. Production tags and images resolve to a commit on
   `downstream/main`.
 - A contribution intended for upstream starts from `upstream/main` and must not
-  depend on downstream-only code or deployment state.
+  depend on downstream-only code or deployment state. Run
+  `scripts/agent-runtime/preflight.sh --mode upstream-edit --fetch` on its topic
+  branch; downstream feature work uses `--mode edit`.
 
 ## Extension design
 

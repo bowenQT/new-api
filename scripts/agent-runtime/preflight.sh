@@ -12,7 +12,8 @@ upstream remote-tracking refs without checking out or merging branches.
 
 Modes:
   read-only  Inspect without preparing to edit (default).
-  edit       Start implementation; rejected on main and downstream/main.
+  edit       Start downstream implementation from downstream/main.
+  upstream-edit  Start an upstream contribution without downstream-only history.
   sync       Audit/synchronize upstream; requires a clean worktree.
   bootstrap  Initialize the runtime on an approved branch.
 EOF
@@ -55,7 +56,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$mode" in
-  read-only | edit | sync | bootstrap)
+  read-only | edit | upstream-edit | sync | bootstrap)
     ;;
   *)
     echo "ERROR: unknown preflight mode: $mode" >&2
@@ -90,9 +91,55 @@ branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || printf 'DETACHED')
 head_sha=$(git rev-parse HEAD)
 status=$(git status --porcelain=v1 --untracked-files=all)
 
-if [[ "$mode" == "edit" && ("$branch" == "main" || "$branch" == "downstream/main") ]]; then
-  echo "ERROR: edit mode requires a feature or maintenance branch; current branch is $branch" >&2
-  exit 1
+if [[ "$mode" == "edit" || "$mode" == "upstream-edit" ]]; then
+  if [[ "$branch" == "DETACHED" || "$branch" == "main" || "$branch" == "downstream/main" || "$branch" == "deploy/sgp1" ]]; then
+    echo "ERROR: $mode mode requires a symbolic topic branch; current branch is $branch" >&2
+    exit 1
+  fi
+fi
+
+if [[ "$mode" == "edit" ]]; then
+  downstream_base_ref=refs/remotes/origin/downstream/main
+  git rev-parse --verify --quiet "$downstream_base_ref^{commit}" >/dev/null || {
+    echo "ERROR: edit mode requires origin/downstream/main; fetch or bootstrap the fork first" >&2
+    exit 1
+  }
+  if ! git merge-base --is-ancestor "$downstream_base_ref" "$head_sha"; then
+    echo "ERROR: edit branch $branch does not descend from origin/downstream/main" >&2
+    exit 1
+  fi
+fi
+
+if [[ "$mode" == "upstream-edit" ]]; then
+  upstream_base_ref=refs/remotes/upstream/main
+  git rev-parse --verify --quiet "$upstream_base_ref^{commit}" >/dev/null || {
+    echo "ERROR: upstream-edit mode requires upstream/main; fetch or bootstrap the fork first" >&2
+    exit 1
+  }
+  if ! git merge-base --is-ancestor "$upstream_base_ref" "$head_sha"; then
+    echo "ERROR: upstream contribution branch $branch does not descend from upstream/main" >&2
+    exit 1
+  fi
+
+  downstream_base_ref=refs/remotes/origin/downstream/main
+  git rev-parse --verify --quiet "$downstream_base_ref^{commit}" >/dev/null || {
+    echo "ERROR: upstream-edit mode requires origin/downstream/main; fetch or bootstrap the fork first" >&2
+    exit 1
+  }
+  downstream_common_bases=$(git merge-base --all "$downstream_base_ref" "$head_sha") || {
+    echo "ERROR: cannot compare upstream contribution with origin/downstream/main" >&2
+    exit 1
+  }
+  [[ -n "$downstream_common_bases" ]] || {
+    echo "ERROR: upstream contribution has no common base with origin/downstream/main" >&2
+    exit 1
+  }
+  while IFS= read -r downstream_common_base; do
+    if ! git merge-base --is-ancestor "$downstream_common_base" "$upstream_base_ref"; then
+      echo "ERROR: upstream contribution branch $branch contains downstream-only history" >&2
+      exit 1
+    fi
+  done <<< "$downstream_common_bases"
 fi
 if [[ "$mode" == "sync" && -n "$status" ]]; then
   echo "ERROR: sync mode requires a clean worktree" >&2

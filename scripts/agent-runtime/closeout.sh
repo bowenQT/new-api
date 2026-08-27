@@ -133,8 +133,9 @@ receipt_dependencies=$(runtime_receipt_value "$receipt_path" dependency_fingerpr
 receipt_git_version=$(runtime_receipt_value "$receipt_path" git_version)
 receipt_go_version=$(runtime_receipt_value "$receipt_path" go_version)
 receipt_bun_version=$(runtime_receipt_value "$receipt_path" bun_version)
+receipt_docker_compose_version=$(runtime_receipt_value "$receipt_path" docker_compose_version)
 
-[[ "$receipt_schema" == "1" ]] || {
+[[ "$receipt_schema" == "2" ]] || {
   echo "ERROR: unsupported receipt schema: $receipt_schema" >&2
   exit 1
 }
@@ -170,6 +171,10 @@ receipt_bun_version=$(runtime_receipt_value "$receipt_path" bun_version)
   echo "ERROR: Bun version no longer matches receipt" >&2
   exit 1
 }
+[[ "$receipt_docker_compose_version" == "$(runtime_profile_docker_compose_version "$profile")" ]] || {
+  echo "ERROR: Docker Compose version no longer matches receipt" >&2
+  exit 1
+}
 
 git diff --check "$base_ref...HEAD"
 read -r base_only head_only <<< "$(git rev-list --left-right --count "$base_ref...HEAD")"
@@ -177,15 +182,16 @@ read -r base_only head_only <<< "$(git rev-list --left-right --count "$base_ref.
 pr_url=NOT_REQUESTED
 pr_state=NOT_REQUESTED
 pr_merge_state=NOT_REQUESTED
+pr_review_decision=NOT_REQUESTED
 if [[ -n "$pr_number" ]]; then
   command -v gh >/dev/null || {
     echo "ERROR: gh is required for PR closeout" >&2
     exit 1
   }
   pr_values=$(gh pr view "$pr_number" --repo bowenQT/new-api \
-    --json headRefOid,baseRefName,state,isDraft,mergeable,mergeStateStatus,url \
-    --jq '[.headRefOid, .baseRefName, .state, (.isDraft | tostring), .mergeable, .mergeStateStatus, .url] | @tsv')
-  IFS=$'\t' read -r pr_head pr_base pr_state pr_draft pr_mergeable pr_merge_state pr_url <<< "$pr_values"
+    --json headRefOid,baseRefName,state,isDraft,mergeable,mergeStateStatus,reviewDecision,url \
+    --jq '[.headRefOid, .baseRefName, .state, (.isDraft | tostring), .mergeable, .mergeStateStatus, (if (.reviewDecision // "") == "" then "NONE" else .reviewDecision end), .url] | @tsv')
+  IFS=$'\t' read -r pr_head pr_base pr_state pr_draft pr_mergeable pr_merge_state pr_review_decision pr_url <<< "$pr_values"
   [[ "$pr_head" == "$expected_head" ]] || {
     echo "ERROR: PR head $pr_head does not match $expected_head" >&2
     exit 1
@@ -198,14 +204,7 @@ if [[ -n "$pr_number" ]]; then
     echo "ERROR: PR is still a draft" >&2
     exit 1
   }
-  [[ "$pr_state" == "OPEN" || "$pr_state" == "MERGED" ]] || {
-    echo "ERROR: PR state is $pr_state" >&2
-    exit 1
-  }
-  [[ "$pr_mergeable" == "MERGEABLE" || "$pr_state" == "MERGED" ]] || {
-    echo "ERROR: PR mergeability is $pr_mergeable" >&2
-    exit 1
-  }
+  runtime_validate_pr_delivery_state "$pr_state" "$pr_mergeable" "$pr_merge_state" "$pr_review_decision"
   gh pr checks "$pr_number" --repo bowenQT/new-api
 fi
 
@@ -219,6 +218,7 @@ printf 'base_only_commits=%s\n' "$base_only"
 printf 'head_only_commits=%s\n' "$head_only"
 printf 'pr_state=%s\n' "$pr_state"
 printf 'pr_merge_state=%s\n' "$pr_merge_state"
+printf 'pr_review_decision=%s\n' "$pr_review_decision"
 printf 'pr_url=%s\n' "$pr_url"
 printf 'database=NOT_CLAIMED\n'
 printf 'deployment=NOT_CLAIMED\n'
