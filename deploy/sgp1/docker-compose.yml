@@ -1,0 +1,118 @@
+services:
+  new-api:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: bowenqt/new-api:${NEW_API_IMAGE_TAG:?set NEW_API_IMAGE_TAG in deploy/sgp1/.env}
+    restart: unless-stopped
+    command: --log-dir /app/logs
+    ports:
+      - "127.0.0.1:${APP_PORT:-3000}:3000"
+    environment:
+      SQL_DSN: postgresql://newapi:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/sgp1/.env}@postgres:5432/newapi?sslmode=disable
+      REDIS_CONN_STRING: redis://default:${REDIS_PASSWORD:?set REDIS_PASSWORD in deploy/sgp1/.env}@redis:6379/0
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in deploy/sgp1/.env}
+      CRYPTO_SECRET: ${CRYPTO_SECRET:?set CRYPTO_SECRET in deploy/sgp1/.env}
+      TZ: Asia/Taipei
+      NODE_NAME: sgp1-new-api-1
+      NODE_TYPE: master
+      TRUSTED_PROXIES: none
+      SESSION_COOKIE_SECURE: "false"
+      ERROR_LOG_ENABLED: "true"
+      MEMORY_CACHE_ENABLED: "true"
+      SYNC_FREQUENCY: "60"
+      BATCH_UPDATE_ENABLED: "true"
+      BATCH_UPDATE_INTERVAL: "5"
+      SQL_MAX_OPEN_CONNS: "30"
+      SQL_MAX_IDLE_CONNS: "10"
+      SQL_MAX_LIFETIME: "60"
+      RELAY_TIMEOUT: "0"
+      STREAMING_TIMEOUT: "300"
+      GENERATE_DEFAULT_TOKEN: "false"
+    volumes:
+      - new_api_data:/data
+      - new_api_logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -q -O - http://localhost:3000/api/status | grep -q '"success":true'
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    security_opt:
+      - no-new-privileges:true
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    logging:
+      driver: json-file
+      options:
+        max-size: 20m
+        max-file: "5"
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: newapi
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/sgp1/.env}
+      POSTGRES_DB: newapi
+      TZ: Asia/Taipei
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U newapi -d newapi
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    shm_size: 256mb
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 20m
+        max-file: "5"
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in deploy/sgp1/.env}
+    command:
+      - sh
+      - -ec
+      - exec redis-server --appendonly yes --requirepass "$${REDIS_PASSWORD}"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - redis-cli --no-auth-warning -a "$${REDIS_PASSWORD}" ping | grep -q PONG
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 20m
+        max-file: "5"
+
+volumes:
+  new_api_data:
+  new_api_logs:
+  postgres_data:
+  redis_data:
