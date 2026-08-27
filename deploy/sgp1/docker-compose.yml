@@ -16,8 +16,9 @@ services:
       TZ: Asia/Taipei
       NODE_NAME: sgp1-new-api-1
       NODE_TYPE: master
-      TRUSTED_PROXIES: none
-      SESSION_COOKIE_SECURE: "false"
+      TRUSTED_PROXIES: 127.0.0.1
+      SESSION_COOKIE_SECURE: "true"
+      SESSION_COOKIE_TRUSTED_URL: ${SESSION_COOKIE_TRUSTED_URL:?set SESSION_COOKIE_TRUSTED_URL in deploy/sgp1/.env}
       ERROR_LOG_ENABLED: "true"
       MEMORY_CACHE_ENABLED: "true"
       SYNC_FREQUENCY: "60"
@@ -51,6 +52,32 @@ services:
       nofile:
         soft: 65535
         hard: 65535
+    logging:
+      driver: json-file
+      options:
+        max-size: 20m
+        max-file: "5"
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.8.2
+    restart: unless-stopped
+    network_mode: "service:new-api"
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in deploy/sgp1/.env}
+    depends_on:
+      new-api:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     logging:
       driver: json-file
       options:
