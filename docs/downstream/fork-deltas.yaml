@@ -1,0 +1,45 @@
+version: 1
+
+# Record downstream behavior that is absent from upstream or any narrow hook in
+# upstream-owned code. Governance-only files under docs/downstream,
+# .agents/runtime, and scripts/agent-runtime do not need their own entry.
+entries:
+  - id: downstream-agent-runtime-hook
+    status: active
+    owner: downstream-maintainers
+    introduced_commit: bc8b76b706ac2d3fe1a48274e358caa68df335ee
+    purpose: Route downstream work to the repo-local runtime and its internal PR contract without replacing upstream project rules.
+    paths:
+      - AGENTS.md
+      - .agents/github/DOWNSTREAM_PR.md
+    upstream_touchpoints:
+      - root agent governance
+      - agent-authored pull request routing
+    conflict_risk: medium
+    verification:
+      - scripts/agent-runtime/verify.sh docs
+      - scripts/agent-runtime/closeout.sh with the exact downstream PR head
+    removal_condition: Remove only if equivalent downstream fork routing becomes available without modifying upstream-owned governance.
+    upstream_reference: null
+
+  - id: sgp1-deployment-profile
+    status: active
+    owner: downstream-maintainers
+    introduced_commit: 09a424a230ef7f3c6c1ce01731822117cab63865
+    purpose: Run the downstream service on DigitalOcean SGP1 behind Cloudflare Tunnel.
+    paths:
+      - deploy/sgp1/.env.example
+      - deploy/sgp1/README.md
+      - deploy/sgp1/docker-compose.yml
+    upstream_touchpoints:
+      - Dockerfile
+      - VERSION
+      - /api/status
+      - runtime environment variables
+    conflict_risk: medium
+    verification:
+      - scripts/agent-runtime/verify.sh deployment
+      - image build when Dockerfile or dependency layers change
+      - local and public health plus unauthenticated API rejection after deployment
+    removal_condition: Remove only if the SGP1 deployment is retired or replaced by an equivalent reviewed downstream deployment profile.
+    upstream_reference: null
