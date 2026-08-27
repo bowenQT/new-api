@@ -4,6 +4,24 @@ version: 1
 # upstream-owned code. Governance-only files under docs/downstream,
 # .agents/runtime, and scripts/agent-runtime do not need their own entry.
 entries:
+  - id: downstream-agent-runtime-hook
+    status: active
+    owner: downstream-maintainers
+    introduced_commit: bc8b76b706ac2d3fe1a48274e358caa68df335ee
+    purpose: Route downstream work to the repo-local runtime and its internal PR contract without replacing upstream project rules.
+    paths:
+      - AGENTS.md
+      - .agents/github/DOWNSTREAM_PR.md
+    upstream_touchpoints:
+      - root agent governance
+      - agent-authored pull request routing
+    conflict_risk: medium
+    verification:
+      - scripts/agent-runtime/verify.sh docs
+      - scripts/agent-runtime/closeout.sh with the exact downstream PR head
+    removal_condition: Remove only if equivalent downstream fork routing becomes available without modifying upstream-owned governance.
+    upstream_reference: null
+
   - id: sgp1-deployment-profile
     status: active
     owner: downstream-maintainers
