@@ -16,7 +16,7 @@ services:
       TZ: Asia/Taipei
       NODE_NAME: sgp1-new-api-1
       NODE_TYPE: master
-      TRUSTED_PROXIES: 172.30.44.2
+      TRUSTED_PROXIES: 172.30.44.3
       SESSION_COOKIE_SECURE: "true"
       SESSION_COOKIE_TRUSTED_URL: ${SESSION_COOKIE_TRUSTED_URL:?set SESSION_COOKIE_TRUSTED_URL in deploy/sgp1/.env}
       ERROR_LOG_ENABLED: "true"
@@ -75,7 +75,7 @@ services:
         condition: service_healthy
     networks:
       tunnel:
-        ipv4_address: 172.30.44.2
+        ipv4_address: 172.30.44.3
     read_only: true
     tmpfs:
       - /tmp
