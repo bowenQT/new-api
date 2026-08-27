@@ -16,7 +16,7 @@ services:
       TZ: Asia/Taipei
       NODE_NAME: sgp1-new-api-1
       NODE_TYPE: master
-      TRUSTED_PROXIES: 127.0.0.1
+      TRUSTED_PROXIES: 172.30.44.2
       SESSION_COOKIE_SECURE: "true"
       SESSION_COOKIE_TRUSTED_URL: ${SESSION_COOKIE_TRUSTED_URL:?set SESSION_COOKIE_TRUSTED_URL in deploy/sgp1/.env}
       ERROR_LOG_ENABLED: "true"
@@ -33,6 +33,9 @@ services:
     volumes:
       - new_api_data:/data
       - new_api_logs:/app/logs
+    networks:
+      - default
+      - tunnel
     depends_on:
       postgres:
         condition: service_healthy
@@ -61,7 +64,6 @@ services:
   cloudflared:
     image: cloudflare/cloudflared:2026.8.2
     restart: unless-stopped
-    network_mode: "service:new-api"
     command:
       - tunnel
       - --no-autoupdate
@@ -71,6 +73,9 @@ services:
     depends_on:
       new-api:
         condition: service_healthy
+    networks:
+      tunnel:
+        ipv4_address: 172.30.44.2
     read_only: true
     tmpfs:
       - /tmp
@@ -143,3 +148,9 @@ volumes:
   new_api_logs:
   postgres_data:
   redis_data:
+
+networks:
+  tunnel:
+    ipam:
+      config:
+        - subnet: 172.30.44.0/29

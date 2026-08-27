@@ -3,7 +3,7 @@
 This deployment runs New API, PostgreSQL, Redis, and Cloudflare Tunnel on one
 Droplet. The application listens on `127.0.0.1:3000`; PostgreSQL and Redis are
 not published to the host network. Cloudflare Tunnel reaches New API through a
-shared network namespace, so no public HTTP port is required on the Droplet.
+dedicated Docker network, so no public HTTP port is required on the Droplet.
 
 ## Start
 
@@ -30,8 +30,8 @@ ssh -L 3000:127.0.0.1:3000 codex-silent-forge-ef4f
 
 Then open `http://127.0.0.1:3000`. Do not publish port 3000 directly on the
 internet. The production deployment enables Secure cookies, restricts trusted
-browser origins to `SESSION_COOKIE_TRUSTED_URL`, and trusts only the loopback
-Cloudflare Tunnel proxy.
+browser origins to `SESSION_COOKIE_TRUSTED_URL`, and trusts only the Cloudflare
+Tunnel container's fixed private address.
 
 ## Update
 
