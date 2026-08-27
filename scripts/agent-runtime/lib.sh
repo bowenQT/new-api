@@ -61,3 +61,19 @@ runtime_receipt_value() {
   value=$(awk -F '\t' -v wanted="$key" '$1 == wanted { print substr($0, index($0, "\t") + 1) }' "$receipt_path")
   printf '%s\n' "$value"
 }
+
+runtime_require_go_test_pass_event() {
+  local events_path=$1
+  local test_name=$2
+
+  if ! awk -v required_test="$test_name" '
+    index($0, "\"Action\":\"pass\"") &&
+      index($0, "\"Test\":\"" required_test "\"") {
+        passed = 1
+      }
+    END { exit passed ? 0 : 1 }
+  ' "$events_path"; then
+    echo "ERROR: required Go test did not pass (a skip is not sufficient): $test_name" >&2
+    return 1
+  fi
+}

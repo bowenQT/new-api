@@ -29,7 +29,8 @@ Record without secrets:
 - source commit on `origin/downstream/main` and its exact remote readback;
 - previous source commit and known-good image tag/digest;
 - candidate image tag and immutable local/registry digest;
-- PostgreSQL backup path/checksum and a completed restore rehearsal result;
+- PostgreSQL backup path outside the Git worktree, owner/mode, checksum, and a
+  completed restore rehearsal result;
 - migration plan, compatibility window, and rollback boundary;
 - staging rehearsal result on production-like data;
 - maintenance window, failure thresholds, and operator;

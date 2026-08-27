@@ -28,6 +28,17 @@ expect_failure() {
   fi
 }
 
+source "$source_root/scripts/agent-runtime/lib.sh"
+
+test_events="$fixture_root/test-events.jsonl"
+printf '%s\n' \
+  '{"Action":"pass","Package":"example.invalid/project/model","Test":"TestDatabaseContract/mysql"}' \
+  '{"Action":"skip","Package":"example.invalid/project/model","Test":"TestDatabaseContract/postgres"}' \
+  > "$test_events"
+runtime_require_go_test_pass_event "$test_events" 'TestDatabaseContract/mysql'
+expect_failure "required Go test did not pass" \
+  runtime_require_go_test_pass_event "$test_events" 'TestDatabaseContract/postgres'
+
 run_in_repo() {
   local repo_path=$1
   shift

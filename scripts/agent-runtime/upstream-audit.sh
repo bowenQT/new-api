@@ -81,24 +81,24 @@ git rev-parse --verify --quiet "$target_ref^{commit}" >/dev/null || {
 upstream_sha=$(git rev-parse "$upstream_ref^{commit}")
 mirror_sha=$(git rev-parse "$mirror_ref^{commit}")
 target_sha=$(git rev-parse "$target_ref^{commit}")
-read -r mirror_only upstream_only <<< "$(git rev-list --left-right --count "$mirror_ref...$upstream_ref")"
+read -r mirror_only upstream_only <<< "$(git rev-list --left-right --count "$mirror_sha...$upstream_sha")"
 
 mirror_state=DIVERGED
 audit_exit=0
 if [[ "$mirror_only" == "0" && "$upstream_only" == "0" ]]; then
   mirror_state=IN_SYNC
-elif git merge-base --is-ancestor "$mirror_ref" "$upstream_ref"; then
+elif git merge-base --is-ancestor "$mirror_sha" "$upstream_sha"; then
   mirror_state=UPSTREAM_AHEAD_FF
   audit_exit=2
-elif git merge-base --is-ancestor "$upstream_ref" "$mirror_ref"; then
+elif git merge-base --is-ancestor "$upstream_sha" "$mirror_sha"; then
   mirror_state=FORK_AHEAD_ONLY
   audit_exit=2
 else
   audit_exit=2
 fi
 
-merge_base=$(git merge-base "$upstream_ref" "$target_ref")
-read -r target_behind target_ahead <<< "$(git rev-list --left-right --count "$upstream_ref...$target_ref")"
+merge_base=$(git merge-base "$upstream_sha" "$target_sha")
+read -r target_behind target_ahead <<< "$(git rev-list --left-right --count "$upstream_sha...$target_sha")"
 
 tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/newapi-upstream-audit.XXXXXX")
 cleanup() {
@@ -111,8 +111,8 @@ upstream_paths="$tmp_dir/upstream-paths"
 overlap_paths="$tmp_dir/overlap-paths"
 risk_paths="$tmp_dir/risk-paths"
 merge_output="$tmp_dir/merge-output"
-git diff --name-only "$merge_base..$target_ref" | LC_ALL=C sort -u > "$local_paths"
-git diff --name-only "$merge_base..$upstream_ref" | LC_ALL=C sort -u > "$upstream_paths"
+git diff --name-only "$merge_base..$target_sha" | LC_ALL=C sort -u > "$local_paths"
+git diff --name-only "$merge_base..$upstream_sha" | LC_ALL=C sort -u > "$upstream_paths"
 comm -12 "$local_paths" "$upstream_paths" > "$overlap_paths"
 
 cat "$local_paths" "$upstream_paths" | LC_ALL=C sort -u |
@@ -128,7 +128,7 @@ merge_state=NO_TEXT_CONFLICT
 set +e
 GIT_OBJECT_DIRECTORY="$temporary_objects" \
   GIT_ALTERNATE_OBJECT_DIRECTORIES="$common_git_dir/objects" \
-  git merge-tree --write-tree --name-only --messages "$target_ref" "$upstream_ref" \
+  git merge-tree --write-tree --name-only --messages "$target_sha" "$upstream_sha" \
     > "$merge_output" 2>&1
 merge_exit=$?
 set -e

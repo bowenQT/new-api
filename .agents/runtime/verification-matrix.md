@@ -10,7 +10,7 @@ below are the minimum, not a substitute for change-specific regression coverage.
 | `relaykit/` | `scripts/agent-runtime/verify.sh relaykit`; independent `GOWORK=off` build is mandatory |
 | Frontend | focused Vitest, then `scripts/agent-runtime/verify.sh frontend`; add a real browser check for changed interaction |
 | Cross-module/API/relay/auth/billing | `scripts/agent-runtime/verify.sh full` plus behavior-specific tests and contract trace |
-| SQLite/MySQL/PostgreSQL schema or DB behavior | `full` plus `scripts/agent-runtime/verify.sh database`; the profile fails unless controlled MySQL and PostgreSQL test DSNs are present and never prints them |
+| SQLite/MySQL/PostgreSQL schema or DB behavior | `full` plus `scripts/agent-runtime/verify.sh database`; use dedicated disposable MySQL and PostgreSQL test databases with no pre-existing `tokens` table |
 | `deploy/sgp1`, Dockerfile, Compose | `scripts/agent-runtime/verify.sh deployment`; add image build when the build chain changed |
 | Production deployment | follow `docs/downstream/sgp1-operations.md`; record exact commit/image digest, backup/restore evidence, Compose and public health, unauthenticated API rejection, and rollback threshold/readback |
 
@@ -27,7 +27,9 @@ below are the minimum, not a substitute for change-specific regression coverage.
   and independent relaykit vet/build. It does not claim live database or
   provider coverage.
 - `database`: runs the existing model/controller database contracts with
-  `TEST_MYSQL_DSN` and `TEST_POSTGRES_DSN`; missing DSNs fail rather than skip.
+  `TEST_MYSQL_DSN` and `TEST_POSTGRES_DSN`. Missing DSNs fail. The external
+  MySQL/PostgreSQL migration tests must each report `PASS`; a skipped test does
+  not produce a receipt. The runtime does not echo the DSN variables.
 - `deployment`: read-only Compose rendering with `.env.example`. It does not
   start containers or prove production health.
 

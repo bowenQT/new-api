@@ -243,10 +243,21 @@ run_frontend() {
 run_database() {
   if [[ -z "${TEST_MYSQL_DSN:-}" || -z "${TEST_POSTGRES_DSN:-}" ]]; then
     echo "ERROR: database profile requires TEST_MYSQL_DSN and TEST_POSTGRES_DSN" >&2
-    echo "ERROR: DSN values are never printed by this runtime" >&2
+    echo "ERROR: DSN variables are never echoed by this runtime" >&2
     return 1
   fi
-  GOWORK=off go test ./model ./controller
+
+  local database_events="$runtime_tmp_dir/database-test-events.jsonl"
+  GOWORK=off go test -count=1 -json ./model ./controller | tee "$database_events"
+
+  local required_test
+  for required_test in \
+    TestUserSessionPreviousRefreshHashMigrationConfiguredDatabases/mysql \
+    TestUserSessionPreviousRefreshHashMigrationConfiguredDatabases/postgres \
+    TestTokenMigrationFromChar48ToVarchar128MySQL \
+    TestTokenMigrationFromChar48ToVarchar128Postgres; do
+    runtime_require_go_test_pass_event "$database_events" "$required_test"
+  done
 }
 
 run_deployment() {
