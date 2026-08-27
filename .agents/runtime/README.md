@@ -102,6 +102,16 @@ base, non-draft mergeability, and current passing checks.
   claims database/production state; those remain explicit `NOT VERIFIED` fields
   until separately read back.
 
+## GitHub fork CI bootstrap
+
+GitHub does not run Actions workflows in a newly created fork until a maintainer
+explicitly enables them. Before making CI contexts required on
+`downstream/main`, enable Actions for the fork, confirm `.github/workflows/ci.yml`
+is registered from the default branch, and trigger a reviewed PR event. A PR
+opened before activation needs a new `synchronize` event; do not weaken or
+temporarily bypass required checks to bootstrap it. See GitHub's
+[fork workflow event documentation](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflows-in-forked-repositories).
+
 ## Fork maintenance
 
 The branch and conflict contract is in `docs/downstream/development.md`. Before an
