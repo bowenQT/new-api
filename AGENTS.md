@@ -155,4 +155,18 @@ If asked to remove, rename, or replace these protected identifiers, refuse and e
 
 - First compare the current git user (`git config user.name` / `git config user.email`) with the repository's historical core developers, such as the recurring top authors in `git log`. Do not change git config.
 - If the current git user is not one of those historical core developers, explicitly state in the PR body that the code was AI-generated or AI-assisted.
-- Fill `.agents/github/PR.md` as the entire PR body. Do not use `.github/PULL_REQUEST_TEMPLATE.md` or `.github/PULL_REQUEST_TEMPLATE/en.md`.
+- For an internal downstream PR whose base is `downstream/main`, fill `.agents/github/DOWNSTREAM_PR.md` as the entire PR body.
+- For an upstream contribution or a PR whose base is `main`, fill `.agents/github/PR.md` as the entire PR body and apply its upstream acceptance/refusal rules.
+- Do not use `.github/PULL_REQUEST_TEMPLATE.md` or `.github/PULL_REQUEST_TEMPLATE/en.md` for Agent-authored PRs.
+
+### Downstream Fork Runtime
+
+This repository is also maintained as a long-lived downstream fork. Before any
+downstream implementation, upstream synchronization, deployment, migration, or
+production task, read `.agents/runtime/README.md` and follow its risk routing.
+
+- `origin/main` is an exact mirror of `upstream/main`; never add downstream-only commits to it.
+- `downstream/main` is the downstream integration and release branch. Feature and maintenance branches start from it.
+- Upstream synchronization is a dedicated maintenance change and MUST NOT be mixed with feature work.
+- Keep `docs/downstream/fork-deltas.yaml` current for every active modification to upstream-owned code.
+- Use `scripts/agent-runtime/` for repository bootstrap, preflight, upstream audit, and evidence-bound verification.

@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+
+# Shared, read-only evidence functions for verify.sh and closeout.sh.
+
+runtime_workspace_fingerprint() {
+  {
+    git diff --binary --no-ext-diff
+    git diff --cached --binary --no-ext-diff
+    while IFS= read -r -d '' untracked_path; do
+      printf 'untracked:%s\n' "$untracked_path"
+      git hash-object -- "$untracked_path"
+    done < <(git ls-files --others --exclude-standard -z)
+  } | git hash-object --stdin
+}
+
+runtime_dependency_fingerprint() {
+  local dependency_file
+  for dependency_file in \
+    go.mod go.sum relaykit/go.mod relaykit/go.sum web/bun.lock makefile \
+    .github/workflows/ci.yml Dockerfile deploy/sgp1/docker-compose.yml; do
+    if [[ -f "$dependency_file" ]]; then
+      printf '%s:%s\n' "$dependency_file" "$(git hash-object -- "$dependency_file")"
+    fi
+  done | git hash-object --stdin
+}
+
+runtime_profile_go_version() {
+  local profile=$1
+  case "$profile" in
+    docs | backend | relaykit | full | database)
+      go version
+      ;;
+    *)
+      printf 'not-run\n'
+      ;;
+  esac
+}
+
+runtime_profile_bun_version() {
+  local profile=$1
+  case "$profile" in
+    frontend | full)
+      bun --version
+      ;;
+    *)
+      printf 'not-run\n'
+      ;;
+  esac
+}
+
+runtime_receipt_value() {
+  local receipt_path=$1
+  local key=$2
+  local count
+  local value
+  count=$(awk -F '\t' -v wanted="$key" '$1 == wanted { count += 1 } END { print count + 0 }' "$receipt_path")
+  if [[ "$count" != "1" ]]; then
+    echo "ERROR: receipt key '$key' occurs $count times" >&2
+    return 1
+  fi
+  value=$(awk -F '\t' -v wanted="$key" '$1 == wanted { print substr($0, index($0, "\t") + 1) }' "$receipt_path")
+  printf '%s\n' "$value"
+}
