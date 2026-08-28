@@ -222,13 +222,182 @@ onbranch_context_overlaps_pattern() {
   local branch_context=$1
   local nested_pattern=$2
   local context_pattern
+  local combined_context
   while IFS= read -r context_pattern; do
     [[ -n "$context_pattern" ]] || continue
     if ! onbranch_conditions_overlap "$context_pattern" "$nested_pattern"; then
       return 1
     fi
   done <<< "$branch_context"
-  return 0
+  combined_context="${branch_context}"$'\n'"${nested_pattern}"
+  onbranch_context_has_compatible_fixed_prefix "$combined_context"
+}
+
+onbranch_parse_fixed_token() {
+  local branch_pattern=$1
+  local token_offset=$2
+  local token_character
+  local class_values
+  local class_character
+  local class_index
+  local closing_index
+  onbranch_token_type=''
+  onbranch_token_next=$token_offset
+  onbranch_token_values=''
+  if [[ "$branch_pattern" == */ ]]; then
+    onbranch_token_type=complex
+    return
+  fi
+  if (( token_offset >= ${#branch_pattern} )); then
+    onbranch_token_type=end
+    return
+  fi
+  token_character=${branch_pattern:$token_offset:1}
+  case "$token_character" in
+    '*')
+      onbranch_token_type=star
+      ;;
+    '\\')
+      if (( token_offset + 1 >= ${#branch_pattern} )); then
+        onbranch_token_type=complex
+        return
+      fi
+      onbranch_token_type=values
+      onbranch_token_values=${branch_pattern:$((token_offset + 1)):1}
+      onbranch_token_next=$((token_offset + 2))
+      ;;
+    '[')
+      closing_index=$((token_offset + 1))
+      while (( closing_index < ${#branch_pattern} )); do
+        if [[ "${branch_pattern:$closing_index:1}" == ']' ]]; then
+          break
+        fi
+        ((closing_index += 1))
+      done
+      if (( closing_index >= ${#branch_pattern} )); then
+        onbranch_token_type=complex
+        return
+      fi
+      class_values=${branch_pattern:$((token_offset + 1)):$((closing_index - token_offset - 1))}
+      case "$class_values" in
+        '' | '!'* | '^'* | *'-'* | *'['* | *'\\'* | *':'*)
+          onbranch_token_type=complex
+          return
+          ;;
+      esac
+      onbranch_token_type=values
+      onbranch_token_next=$((closing_index + 1))
+      class_index=0
+      while (( class_index < ${#class_values} )); do
+        class_character=${class_values:$class_index:1}
+        onbranch_token_values+=$class_character
+        ((class_index += 1))
+      done
+      ;;
+    '?')
+      onbranch_token_type=any
+      onbranch_token_next=$((token_offset + 1))
+      ;;
+    *)
+      onbranch_token_type=values
+      onbranch_token_values=$token_character
+      onbranch_token_next=$((token_offset + 1))
+      ;;
+  esac
+}
+
+onbranch_context_has_compatible_fixed_prefix() {
+  local branch_context=$1
+  local context_pattern
+  local patterns=()
+  local token_offsets=()
+  local active_patterns=()
+  local pattern_index
+  local active_count
+  local has_end
+  local has_consuming_token
+  local has_restrictive_token
+  local candidates=''
+  local filtered_candidates
+  local candidate
+  local token_value
+  local candidate_matches
+  local class_index
+  local token_index
+  while IFS= read -r context_pattern; do
+    [[ -n "$context_pattern" ]] || continue
+    patterns+=("$context_pattern")
+    token_offsets+=(0)
+    active_patterns+=(true)
+  done <<< "$branch_context"
+  while true; do
+    active_count=0
+    has_end=false
+    has_consuming_token=false
+    has_restrictive_token=false
+    candidates=''
+    for ((pattern_index = 0; pattern_index < ${#patterns[@]}; pattern_index += 1)); do
+      if ! "${active_patterns[$pattern_index]}"; then
+        continue
+      fi
+      ((active_count += 1))
+      onbranch_parse_fixed_token \
+        "${patterns[$pattern_index]}" "${token_offsets[$pattern_index]}"
+      case "$onbranch_token_type" in
+        complex)
+          return 0
+          ;;
+        star)
+          active_patterns[$pattern_index]=false
+          ;;
+        end)
+          has_end=true
+          ;;
+        any)
+          has_consuming_token=true
+          token_offsets[$pattern_index]=$onbranch_token_next
+          ;;
+        values)
+          has_consuming_token=true
+          token_offsets[$pattern_index]=$onbranch_token_next
+          if ! "$has_restrictive_token"; then
+            candidates=$onbranch_token_values
+            has_restrictive_token=true
+            continue
+          fi
+          filtered_candidates=''
+          class_index=0
+          while (( class_index < ${#candidates} )); do
+            candidate=${candidates:$class_index:1}
+            candidate_matches=false
+            token_index=0
+            while (( token_index < ${#onbranch_token_values} )); do
+              token_value=${onbranch_token_values:$token_index:1}
+              if [[ "$candidate" == "$token_value" ]]; then
+                candidate_matches=true
+                break
+              fi
+              ((token_index += 1))
+            done
+            if "$candidate_matches"; then
+              filtered_candidates+=$candidate
+            fi
+            ((class_index += 1))
+          done
+          candidates=$filtered_candidates
+          ;;
+      esac
+    done
+    if "$has_end" && "$has_consuming_token"; then
+      return 1
+    fi
+    if "$has_restrictive_token" && [[ -z "$candidates" ]]; then
+      return 1
+    fi
+    if (( active_count == 0 )) || ! "$has_consuming_token"; then
+      return 0
+    fi
+  done
 }
 
 scan_conditioned_config() {

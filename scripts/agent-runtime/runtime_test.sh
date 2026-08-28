@@ -392,6 +392,24 @@ git config --file "$nested_onbranch_middle_config" \
 expect_failure "branch-conditioned safety override" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
 git -C "$fixture_repo" config --local --unset 'includeIf.onbranch:release-*.path'
+git config --file "$nested_onbranch_middle_config" --unset-all \
+  'includeIf.onbranch:release-prod1.path'
+git config --file "$nested_onbranch_middle_config" \
+  'includeIf.onbranch:[ac]*.path' "$nested_onbranch_inner_config"
+git config --file "$nested_onbranch_outer_config" --unset-all \
+  'includeIf.onbranch:release-prod*.path'
+git config --file "$nested_onbranch_outer_config" \
+  'includeIf.onbranch:[bc]*.path' "$nested_onbranch_middle_config"
+git -C "$fixture_repo" config --local 'includeIf.onbranch:[ab]*.path' \
+  "$nested_onbranch_outer_config"
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check >/dev/null
+git config --file "$nested_onbranch_middle_config" --unset-all \
+  'includeIf.onbranch:[ac]*.path'
+git config --file "$nested_onbranch_middle_config" \
+  'includeIf.onbranch:[b]*.path' "$nested_onbranch_inner_config"
+expect_failure "branch-conditioned safety override" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset 'includeIf.onbranch:[ab]*.path'
 nested_outer_config="$fixture_root/nested-outer-config"
 nested_inactive_config="$fixture_root/nested-inactive-config"
 git config --file "$nested_inactive_config" pull.ff false
