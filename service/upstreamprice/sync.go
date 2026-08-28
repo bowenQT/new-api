@@ -652,12 +652,7 @@ func SyncPriceSource(ctx context.Context, sourceId int, previewToken string) (*d
 	if err != nil {
 		return nil, err
 	}
-	if !source.Enabled {
-		return nil, errors.New("price source is disabled; commit refused")
-	}
-	// Fast fail before fetching; the authoritative orphan/disabled check runs
-	// again inside the commit transaction under the row lock.
-	if err := checkSupplierChannelForCommit(source); err != nil {
+	if err := checkSourceRunnableForCommit(source); err != nil {
 		return nil, err
 	}
 
@@ -677,14 +672,7 @@ func SyncPriceSource(ctx context.Context, sourceId int, previewToken string) (*d
 
 	plan, planErr := buildSyncPlan(ctx, source)
 	if planErr != nil {
-		if plan != nil {
-			recordRun := buildRunFromPlan(plan, planErr.Error())
-			if _, recordErr := model.RecordFailedPriceSyncRun(source.Id, recordRun); recordErr != nil {
-				return nil, fmt.Errorf("fetch failed (%v) and failed run could not be recorded: %w", planErr, recordErr)
-			}
-			return nil, planErr
-		}
-		return nil, planErr
+		return nil, recordSyncPlanFailure(source, plan, planErr)
 	}
 	if !intPtrEqual(claim.BaseRunId, plan.BaseRunId) {
 		return nil, model.ErrPriceSyncConflict
@@ -700,6 +688,51 @@ func SyncPriceSource(ctx context.Context, sourceId int, previewToken string) (*d
 		return nil, errors.New("source content changed since preview, re-preview required")
 	}
 
+	return commitSyncPlan(source, plan, claim.ConfigRevision, claim.BaseRunId)
+}
+
+// SyncPriceSourceWithoutPreview is the unattended commit path used by the
+// scheduled task (spec §8.4). There is no human preview, but the fetch,
+// normalization, validation, and coverage/change gates are identical, and the
+// same CAS-guarded commit transaction writes the result. It never touches sale
+// pricing.
+func SyncPriceSourceWithoutPreview(ctx context.Context, source *model.PriceSource) (*dto.UpstreamPriceSyncResponse, error) {
+	if err := checkSourceRunnableForCommit(source); err != nil {
+		return nil, err
+	}
+	plan, planErr := buildSyncPlan(ctx, source)
+	if planErr != nil {
+		return nil, recordSyncPlanFailure(source, plan, planErr)
+	}
+	return commitSyncPlan(source, plan, plan.Source.ConfigRevision, plan.BaseRunId)
+}
+
+// checkSourceRunnableForCommit is the pre-fetch gate shared by the manual and
+// the scheduled commit paths. The authoritative orphan/disabled check runs
+// again inside the commit transaction under the row lock.
+func checkSourceRunnableForCommit(source *model.PriceSource) error {
+	if !source.Enabled {
+		return errors.New("price source is disabled; commit refused")
+	}
+	return checkSupplierChannelForCommit(source)
+}
+
+// recordSyncPlanFailure persists a failed run for a fetch that never produced
+// a plan result, then returns the original failure.
+func recordSyncPlanFailure(source *model.PriceSource, plan *syncPlan, planErr error) error {
+	if plan == nil {
+		return planErr
+	}
+	recordRun := buildRunFromPlan(plan, planErr.Error())
+	if _, recordErr := model.RecordFailedPriceSyncRun(source.Id, recordRun); recordErr != nil {
+		return fmt.Errorf("fetch failed (%v) and failed run could not be recorded: %w", planErr, recordErr)
+	}
+	return planErr
+}
+
+// commitSyncPlan writes one prepared plan through the CAS-guarded commit
+// transaction and summarizes the resulting run.
+func commitSyncPlan(source *model.PriceSource, plan *syncPlan, expectedConfigRevision int64, expectedBaseRunId *int) (*dto.UpstreamPriceSyncResponse, error) {
 	errorSummary := ""
 	if plan.Status == model.PriceSyncRunStatusFailed {
 		if plan.ValidCount == 0 {
@@ -710,8 +743,8 @@ func SyncPriceSource(ctx context.Context, sourceId int, previewToken string) (*d
 	}
 	commit := &model.PriceSyncCommit{
 		SourceId:               source.Id,
-		ExpectedConfigRevision: claim.ConfigRevision,
-		ExpectedBaseRunId:      claim.BaseRunId,
+		ExpectedConfigRevision: expectedConfigRevision,
+		ExpectedBaseRunId:      expectedBaseRunId,
 		Run:                    buildRunFromPlan(plan, errorSummary),
 		Items:                  buildCommitItems(plan),
 	}

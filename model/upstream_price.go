@@ -140,6 +140,14 @@ func GetAllPriceSources() ([]*PriceSource, error) {
 	return sources, err
 }
 
+// CountSchedulablePriceSources counts sources that are both enabled and
+// scheduled, so the background task creates no rows when nothing is scheduled.
+func CountSchedulablePriceSources() (int64, error) {
+	var count int64
+	err := DB.Model(&PriceSource{}).Where("enabled = ? AND schedule_enabled = ?", true, true).Count(&count).Error
+	return count, err
+}
+
 func GetPriceSourceById(id int) (*PriceSource, error) {
 	if id <= 0 {
 		return nil, errors.New("invalid price source id")
