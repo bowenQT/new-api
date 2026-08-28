@@ -33,6 +33,7 @@ const originalGet = apiClient.get
 const originalPost = apiClient.post
 let queryClient: QueryClient | null = null
 let requestedUrls: string[] = []
+let comparePayloads: unknown[] = []
 
 const comparison: PriceCompareResponse = {
   generated_at: 1_700_000_000,
@@ -82,6 +83,7 @@ const comparison: PriceCompareResponse = {
 
 function installApi(compare: PriceCompareResponse | Error) {
   requestedUrls = []
+  comparePayloads = []
   apiClient.get = async (url) => {
     requestedUrls.push(url)
     if (url === '/api/group') {
@@ -89,11 +91,12 @@ function installApi(compare: PriceCompareResponse | Error) {
     }
     throw new Error(`Unexpected GET ${url}`)
   }
-  apiClient.post = async (url) => {
+  apiClient.post = async (url, data) => {
     requestedUrls.push(url)
     if (url !== '/api/upstream-prices/compare') {
       throw new Error(`Unexpected POST ${url}`)
     }
+    comparePayloads.push(data)
     if (compare instanceof Error) throw compare
     return { data: { success: true, data: compare } }
   }
@@ -188,6 +191,48 @@ describe('price comparison panel', () => {
     expect(
       screen.getByRole('button', { name: 'Apply usage vector' })
     ).toBeDisabled()
+  })
+
+  // The response is capped, so filtering only what came back would search the
+  // first page of a truncated catalog: the filter has to reach the server.
+  test('submits the applied model filter in the comparison request', async () => {
+    installApi(comparison)
+
+    renderPanel()
+    await screen.findByText('gpt-4o')
+    expect(comparePayloads).toEqual([
+      { group: 'default', usage: { p: 1_000_000, c: 1_000_000, cr: 0, cc: 0 } },
+    ])
+
+    const apply = screen.getByRole('button', { name: 'Apply filter' })
+    expect(apply).toBeDisabled()
+
+    fireEvent.change(screen.getByLabelText('Filter models'), {
+      target: { value: '  Claude  ' },
+    })
+    await waitFor(() => expect(apply).toBeEnabled())
+    fireEvent.click(apply)
+
+    await waitFor(() => expect(comparePayloads).toHaveLength(2))
+    expect(comparePayloads[1]).toEqual({
+      group: 'default',
+      usage: { p: 1_000_000, c: 1_000_000, cr: 0, cc: 0 },
+      model_filter: 'Claude',
+    })
+    expect(apply).toBeDisabled()
+  })
+
+  test('tells the reader to apply a filter when the result is truncated', async () => {
+    installApi({ ...comparison, truncated: true, total_models: 620 })
+
+    renderPanel()
+
+    expect(await screen.findByText('Result truncated')).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        'More models match than one comparison returns. Type a model filter and apply it, so the server narrows the catalog before the limit.'
+      )
+    ).toBeInTheDocument()
   })
 
   test('lists the factors the projection deliberately excludes', async () => {

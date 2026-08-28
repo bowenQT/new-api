@@ -29,6 +29,9 @@ export const DEFAULT_SCHEDULE_INTERVAL_SECONDS = 24 * 60 * 60
 /** `upstreamprice.MaxCompareModels` — the comparison response cap. */
 export const MAX_COMPARE_MODELS = 500
 
+/** `dto.MaxCompareModelFilterLength` — bound of the server-side model filter. */
+export const MAX_COMPARE_MODEL_FILTER_LENGTH = 255
+
 /** `dto.MaxCompareUsageTokens` — per-dimension bound of the usage vector. */
 export const MAX_COMPARE_USAGE_TOKENS = 1e9
 

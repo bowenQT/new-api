@@ -242,18 +242,30 @@ const MaxCompareModelsRequested = 500
 // meaningless or non-finite amounts.
 const MaxCompareUsageTokens = float64(1e9)
 
+// MaxCompareModelFilterLength bounds the catalog-wide substring filter.
+const MaxCompareModelFilterLength = 255
+
 // UpstreamPriceCompareRequest asks for a cost / sale-price / margin comparison
 // (spec §9.2, §10.3). An empty Models list compares every canonical model the
 // catalog currently knows.
 type UpstreamPriceCompareRequest struct {
-	Models []string                  `json:"models"`
-	Group  string                    `json:"group"`
-	Usage  *UpstreamPriceUsageVector `json:"usage"`
+	Models []string `json:"models"`
+	// ModelFilter narrows the catalog-wide comparison to canonical model names
+	// containing this case-insensitive substring. It is applied before the
+	// response cap, so a catalog larger than the cap stays searchable. An
+	// explicit Models list is already a narrowed set, so the filter is ignored
+	// then (spec §10.3).
+	ModelFilter string                    `json:"model_filter"`
+	Group       string                    `json:"group"`
+	Usage       *UpstreamPriceUsageVector `json:"usage"`
 }
 
 func (r *UpstreamPriceCompareRequest) Validate() error {
 	if len(r.Models) > MaxCompareModelsRequested {
 		return fmt.Errorf("at most %d models may be compared per request", MaxCompareModelsRequested)
+	}
+	if len(r.ModelFilter) > MaxCompareModelFilterLength {
+		return fmt.Errorf("model_filter must be at most %d characters", MaxCompareModelFilterLength)
 	}
 	for _, name := range r.Models {
 		if strings.TrimSpace(name) == "" {

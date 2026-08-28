@@ -43,6 +43,7 @@ import {
   DEFAULT_COMPARE_GROUP,
   DEFAULT_COMPARE_USAGE,
   EXCLUDED_FACTOR_LABEL_KEYS,
+  MAX_COMPARE_MODEL_FILTER_LENGTH,
   MAX_COMPARE_USAGE_TOKENS,
   priceCatalogQueryKeys,
 } from '../constants'
@@ -72,7 +73,12 @@ export function PriceComparePanel() {
     DEFAULT_COMPARE_USAGE
   )
   const [group, setGroup] = useState(DEFAULT_COMPARE_GROUP)
-  const [modelFilter, setModelFilter] = useState('')
+  // The filter is submitted to the server, because the response is capped at
+  // MAX_COMPARE_MODELS: filtering only what came back would search the first
+  // page of a truncated catalog. The draft still narrows the rendered rows
+  // immediately, as a second pass inside the returned page.
+  const [draftModelFilter, setDraftModelFilter] = useState('')
+  const [appliedModelFilter, setAppliedModelFilter] = useState('')
 
   const groupsQuery = useQuery({
     queryKey: priceCatalogQueryKeys.groups,
@@ -91,10 +97,14 @@ export function PriceComparePanel() {
     queryKey: priceCatalogQueryKeys.compare(
       group,
       usageVectorKey(appliedUsage),
-      ''
+      appliedModelFilter
     ),
     queryFn: async () => {
-      const res = await comparePrices({ group, usage: appliedUsage })
+      const res = await comparePrices({
+        group,
+        usage: appliedUsage,
+        model_filter: appliedModelFilter || undefined,
+      })
       if (!res.success || !res.data) {
         throw new Error(
           res.message || t('We could not compare catalog prices.')
@@ -107,12 +117,12 @@ export function PriceComparePanel() {
 
   const entries = useMemo(() => {
     const all = compareQuery.data?.entries ?? []
-    const needle = modelFilter.trim().toLowerCase()
+    const needle = draftModelFilter.trim().toLowerCase()
     if (needle === '') return all
     return all.filter((entry) =>
       entry.canonical_model_name.toLowerCase().includes(needle)
     )
-  }, [compareQuery.data, modelFilter])
+  }, [compareQuery.data, draftModelFilter])
 
   const groupOptions = useMemo(() => {
     const names = new Set(groupsQuery.data ?? [])
@@ -194,12 +204,28 @@ export function PriceComparePanel() {
             <Label htmlFor='price-compare-model-filter'>
               {t('Filter models')}
             </Label>
-            <Input
-              id='price-compare-model-filter'
-              value={modelFilter}
-              onChange={(e) => setModelFilter(e.target.value)}
-              placeholder={t('e.g. gpt-4o')}
-            />
+            <div className='flex gap-2'>
+              <Input
+                id='price-compare-model-filter'
+                value={draftModelFilter}
+                maxLength={MAX_COMPARE_MODEL_FILTER_LENGTH}
+                onChange={(e) => setDraftModelFilter(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter') return
+                  e.preventDefault()
+                  setAppliedModelFilter(draftModelFilter.trim())
+                }}
+                placeholder={t('e.g. gpt-4o')}
+              />
+              <Button
+                type='button'
+                variant='outline'
+                disabled={draftModelFilter.trim() === appliedModelFilter}
+                onClick={() => setAppliedModelFilter(draftModelFilter.trim())}
+              >
+                {t('Apply filter')}
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -311,7 +337,7 @@ export function PriceComparePanel() {
           <AlertTitle>{t('Result truncated')}</AlertTitle>
           <AlertDescription>
             {t(
-              'The catalog holds more models than one comparison returns. Narrow the filter to inspect the rest.'
+              'More models match than one comparison returns. Type a model filter and apply it, so the server narrows the catalog before the limit.'
             )}
           </AlertDescription>
         </Alert>

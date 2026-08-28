@@ -587,6 +587,7 @@ Phase 2 实施口径：
 - 分组默认 `default`，管理员可指定任意分组（§21 Q4 裁决）；分组未配置倍率时按 1 计算并在响应中标注 `group_ratio_configured=false`。
 - usage vector 缺省为 `p = c = 1,000,000`、`cr = cc = 0`，并在响应中原样回显，使金额口径始终显式。每个维度必须有限、非负且 ≤ 1e9。
 - 模型列表为空表示比较目录中全部 canonical 模型，按名称排序上限 500 条，超出时置 `truncated=true`。
+- 可选 `model_filter` 为 canonical 模型名的大小写不敏感子串（最长 255 字符），在 500 条上限**之前**过滤，因此目录超过上限时仍可检索到全部匹配项；`total_models` 为匹配总数，过滤后仍超过上限才置 `truncated=true`。匹配只作用于 canonical 模型名（比较行本身即以 canonical 名聚合），不匹配 `source_model_name`。显式 `models` 列表本身即已收窄集合，此时忽略 `model_filter`，`models` 语义不变。
 - 参与毛利的成本只取本次 `last_success_run` 的观察值（current 与 stale）；`missing`（上游已不再返回）不参与最低/最高与毛利。任一贡献成本为 stale、orphaned、canonical 冲突或 `varies_by_provider` 时置 `cost_confirmed=false`。
 - `curated_reference` 与 `vendor_list` 价格单独返回，不参与毛利。
 - 每条来源价格回带该观察值快照自身的 `fetched_at` 与 `effective_at`，使 §8.3 要求的时间标注无需再全量调用 `/current`。

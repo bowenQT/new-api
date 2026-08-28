@@ -379,3 +379,110 @@ func TestCompareSourcePriceCarriesSnapshotTimestamps(t *testing.T) {
 	require.NotNil(t, cost.EffectiveAt)
 	assert.Equal(t, effectiveAt, *cost.EffectiveAt)
 }
+
+// TestSelectCompareModelsFilter pins the §10.3 filter contract: the substring
+// filter narrows the catalog before the MaxCompareModels cap, so a catalog
+// larger than the cap stays searchable end to end.
+func TestSelectCompareModelsFilter(t *testing.T) {
+	catalog := make(map[string][]dto.UpstreamCurrentPriceEntry)
+	for i := 0; i < MaxCompareModels+120; i++ {
+		catalog[fmt.Sprintf("gpt-%04d", i)] = nil
+	}
+	for i := 0; i < 3; i++ {
+		catalog[fmt.Sprintf("Claude-Sonnet-%d", i)] = nil
+	}
+
+	cases := []struct {
+		name          string
+		requested     []string
+		filter        string
+		wantCount     int
+		wantTotal     int
+		wantTruncated bool
+		wantFirst     string
+	}{
+		{
+			name:          "empty filter compares the whole catalog up to the cap",
+			wantCount:     MaxCompareModels,
+			wantTotal:     MaxCompareModels + 123,
+			wantTruncated: true,
+			wantFirst:     "Claude-Sonnet-0",
+		},
+		{
+			name:          "a filter matching more than the cap still truncates",
+			filter:        "gpt-",
+			wantCount:     MaxCompareModels,
+			wantTotal:     MaxCompareModels + 120,
+			wantTruncated: true,
+			wantFirst:     "gpt-0000",
+		},
+		{
+			name:      "a filter narrowing below the cap returns every match",
+			filter:    "sonnet",
+			wantCount: 3,
+			wantTotal: 3,
+			wantFirst: "Claude-Sonnet-0",
+		},
+		{
+			name:      "the filter is trimmed and case-insensitive",
+			filter:    "  SONNET-2 ",
+			wantCount: 1,
+			wantTotal: 1,
+			wantFirst: "Claude-Sonnet-2",
+		},
+		{
+			name:      "a filter matching nothing returns no model",
+			filter:    "gemini",
+			wantCount: 0,
+			wantTotal: 0,
+		},
+		{
+			name:      "an explicit model list is honored verbatim and ignores the filter",
+			requested: []string{"gpt-0001", "gemini-not-in-catalog"},
+			filter:    "sonnet",
+			wantCount: 2,
+			wantTotal: 2,
+			wantFirst: "gpt-0001",
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			names, total, truncated := selectCompareModels(testCase.requested, testCase.filter, catalog)
+			assert.Len(t, names, testCase.wantCount)
+			assert.Equal(t, testCase.wantTotal, total)
+			assert.Equal(t, testCase.wantTruncated, truncated)
+			if testCase.wantFirst != "" {
+				require.NotEmpty(t, names)
+				assert.Equal(t, testCase.wantFirst, names[0])
+			}
+		})
+	}
+}
+
+// TestCompareUpstreamPricesModelFilter pins that the filter reaches the API
+// response, so narrowing a truncated catalog is a server-side operation.
+func TestCompareUpstreamPricesModelFilter(t *testing.T) {
+	db := setupCompareTestDB(t)
+	setupCompareSaleConfig(t)
+	now := common.GetTimestamp()
+	channel := &model.Channel{Name: "filter-channel", Key: "k", Status: common.ChannelStatusEnabled}
+	require.NoError(t, db.Create(channel).Error)
+	seedCatalogSnapshot(t, db, "tiered-cost", RoleSupplierCost, &channel.Id, "tiered-model",
+		`tier("base", p * 1 + c * 5)`, FormulaKindTokenExprV1, "", now)
+	seedCatalogSnapshot(t, db, "ratio-cost", RoleSupplierCost, &channel.Id, "ratio-model",
+		`tier("base", p * 1 + c * 5)`, FormulaKindTokenExprV1, "", now)
+
+	response, err := CompareUpstreamPrices(&dto.UpstreamPriceCompareRequest{ModelFilter: "TIERED"})
+	require.NoError(t, err)
+	require.Len(t, response.Entries, 1)
+	assert.Equal(t, "tiered-model", response.Entries[0].CanonicalModelName)
+	assert.Equal(t, 1, response.TotalModels)
+	assert.False(t, response.Truncated)
+
+	tooLong, err := CompareUpstreamPrices(&dto.UpstreamPriceCompareRequest{
+		ModelFilter: strings.Repeat("m", dto.MaxCompareModelFilterLength+1),
+	})
+	require.ErrorContains(t, err, "model_filter")
+	assert.Nil(t, tooLong)
+}

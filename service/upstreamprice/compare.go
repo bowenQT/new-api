@@ -179,7 +179,7 @@ func CompareUpstreamPrices(request *dto.UpstreamPriceCompareRequest) (*dto.Upstr
 		pricesByModel[entry.CanonicalModelName] = append(pricesByModel[entry.CanonicalModelName], entry)
 	}
 
-	modelNames, total, truncated := selectCompareModels(request.Models, pricesByModel)
+	modelNames, total, truncated := selectCompareModels(request.Models, request.ModelFilter, pricesByModel)
 
 	response := &dto.UpstreamPriceCompareResponse{
 		GeneratedAt:          common.GetTimestamp(),
@@ -224,9 +224,13 @@ func CompareUpstreamPrices(request *dto.UpstreamPriceCompareRequest) (*dto.Upstr
 
 // selectCompareModels resolves the requested model set. An explicit list is
 // honored verbatim (deduplicated) so a caller can ask about a model the
-// catalog does not cover; an empty list compares every canonical model in the
-// catalog, capped at MaxCompareModels in sort order.
-func selectCompareModels(requested []string, pricesByModel map[string][]dto.UpstreamCurrentPriceEntry) ([]string, int, bool) {
+// catalog does not cover, and modelFilter does not apply to it; an empty list
+// compares every canonical model in the catalog whose name contains
+// modelFilter (case-insensitive). The filter runs before the MaxCompareModels
+// cap, so a catalog larger than the cap can still be searched end to end; the
+// returned total counts the matching models and Truncated still means "more
+// matches exist than this response carries".
+func selectCompareModels(requested []string, modelFilter string, pricesByModel map[string][]dto.UpstreamCurrentPriceEntry) ([]string, int, bool) {
 	names := make([]string, 0, len(requested))
 	seen := make(map[string]bool, len(requested))
 	if len(requested) > 0 {
@@ -240,7 +244,11 @@ func selectCompareModels(requested []string, pricesByModel map[string][]dto.Upst
 		}
 		return names, len(names), false
 	}
+	needle := strings.ToLower(strings.TrimSpace(modelFilter))
 	for name := range pricesByModel {
+		if needle != "" && !strings.Contains(strings.ToLower(name), needle) {
+			continue
+		}
 		names = append(names, name)
 	}
 	sort.Strings(names)

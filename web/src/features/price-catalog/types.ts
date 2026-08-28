@@ -204,6 +204,11 @@ export interface PriceUsageVector {
 /** `dto.UpstreamPriceCompareRequest` */
 export interface PriceCompareRequest {
   models?: string[]
+  /**
+   * Case-insensitive substring over canonical model names, applied before the
+   * response cap. Ignored when `models` names an explicit list (spec §10.3).
+   */
+  model_filter?: string
   group?: string
   usage?: PriceUsageVector
 }
