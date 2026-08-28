@@ -78,7 +78,7 @@ matches_github_repo() {
   return 1
 }
 
-protected_config_regex='^(remote\.(origin|upstream)\.(fetch|url|pushurl)|remote\.origin\.(mirror|push)|remote\.pushdefault|url\..*\.(insteadof|pushinsteadof)|push\.default|pull\.ff|fetch\.prune|rebase\.autostash|merge\.autostash|merge\.conflictstyle|rerere\.enabled|rerere\.autoupdate|branch\..*\.pushremote|branch\.main\.(remote|merge|mergeoptions)|branch\.downstream/main\.(remote|merge|mergeoptions))$'
+protected_config_regex='^(remote\.(origin|upstream)\.(fetch|url|pushurl)|remote\.origin\.(mirror|push)|remote\.pushdefault|url\..*\.(insteadof|pushinsteadof)|push\.default|pull\.(ff|twohead)|fetch\.prune|rebase\.autostash|merge\.autostash|merge\.conflictstyle|rerere\.enabled|rerere\.autoupdate|branch\..*\.pushremote|branch\.main\.(remote|merge|mergeoptions)|branch\.downstream/main\.(remote|merge|mergeoptions))$'
 conditioned_config_files=()
 onbranch_match_root=''
 conditioned_scan_root=$(mktemp -d "${TMPDIR:-/tmp}/newapi-conditioned-scan.XXXXXX")
@@ -262,12 +262,26 @@ conditioned_include_is_active() {
   local target_path=$3
   local origin
   local config_entry
+  local output_file
+  local error_file
+  local command_exit
+  output_file=$(mktemp "$conditioned_scan_root/effective.XXXXXX")
+  error_file=$(mktemp "$conditioned_scan_root/effective-error.XXXXXX")
+  set +e
+  git -C "$worktree_path" -c include.path="$parent_path" config \
+    --includes --null --show-origin --get-regexp '.*' > "$output_file" 2> "$error_file"
+  command_exit=$?
+  set -e
+  if (( command_exit > 1 )); then
+    cat "$error_file" >&2
+    echo "ERROR: cannot evaluate nested conditioned include: $target_path" >&2
+    return 2
+  fi
   while IFS= read -r -d '' origin && IFS= read -r -d '' config_entry; do
     if [[ "${origin#file:}" == "$target_path" ]]; then
       return 0
     fi
-  done < <(git -C "$worktree_path" -c include.path="$parent_path" config \
-    --includes --null --show-origin --get-regexp '.*' 2>/dev/null || true)
+  done < "$output_file"
   return 1
 }
 
@@ -308,6 +322,7 @@ validate_nested_conditioned_config() {
   local nested_branch_context
   local protected_scan_file
   local include_scan_file
+  local include_status
   for seen_path in "${conditioned_config_files[@]}"; do
     if [[ "$seen_path" == "$seen_key" ]]; then
       return 0
@@ -353,6 +368,11 @@ validate_nested_conditioned_config() {
         if conditioned_include_is_active "$worktree_path" "$config_path" "$nested_path"; then
           validate_nested_conditioned_config \
             "$worktree_path" "$nested_path" "$branch_context" || return 1
+        else
+          include_status=$?
+          if (( include_status > 1 )); then
+            return 1
+          fi
         fi
         ;;
     esac
@@ -513,6 +533,7 @@ done
 if [[ "$mode" == "apply" ]]; then
   git config --local --unset-all remote.origin.push 2>/dev/null || true
   git config --local --unset-all remote.origin.mirror 2>/dev/null || true
+  git config --local --unset-all pull.twohead 2>/dev/null || true
   git config --local --unset-all branch.main.mergeOptions 2>/dev/null || true
   git config --local --unset-all branch.downstream/main.mergeOptions 2>/dev/null || true
   while IFS= read -r branch_push_key; do
@@ -536,17 +557,15 @@ if [[ "$mode" == "apply" ]]; then
 
   git config --local --replace-all branch.main.remote origin
   git config --local --replace-all branch.main.merge refs/heads/main
-  if git show-ref --verify --quiet refs/heads/downstream/main &&
-    git show-ref --verify --quiet refs/remotes/origin/downstream/main; then
-    git config --local --replace-all branch.downstream/main.remote origin
-    git config --local --replace-all branch.downstream/main.merge refs/heads/downstream/main
-  fi
+  git config --local --replace-all branch.downstream/main.remote origin
+  git config --local --replace-all branch.downstream/main.merge refs/heads/downstream/main
 fi
 
 for worktree_path in "${worktree_paths[@]}"; do
   validate_effective_upstream_push "$worktree_path"
   validate_effective_unset "$worktree_path" remote.origin.push
   validate_effective_unset "$worktree_path" remote.origin.mirror
+  validate_effective_unset "$worktree_path" pull.twohead
   validate_effective_unset "$worktree_path" branch.main.mergeOptions
   validate_effective_unset "$worktree_path" branch.downstream/main.mergeOptions
   validate_effective_branch_push_remotes "$worktree_path"
@@ -632,15 +651,12 @@ for worktree_path in "${worktree_paths[@]}"; do
   check_effective_multi_config "$worktree_path" branch.main.merge refs/heads/main
 done
 
-if git show-ref --verify --quiet refs/heads/downstream/main &&
-  git show-ref --verify --quiet refs/remotes/origin/downstream/main; then
-  check_local_config branch.downstream/main.remote origin
-  check_local_config branch.downstream/main.merge refs/heads/downstream/main
-  for worktree_path in "${worktree_paths[@]}"; do
-    check_effective_scalar_config "$worktree_path" branch.downstream/main.remote origin
-    check_effective_multi_config "$worktree_path" branch.downstream/main.merge refs/heads/downstream/main
-  done
-fi
+check_local_config branch.downstream/main.remote origin
+check_local_config branch.downstream/main.merge refs/heads/downstream/main
+for worktree_path in "${worktree_paths[@]}"; do
+  check_effective_scalar_config "$worktree_path" branch.downstream/main.remote origin
+  check_effective_multi_config "$worktree_path" branch.downstream/main.merge refs/heads/downstream/main
+done
 
 printf 'repository=%s\n' "$repo_root"
 printf 'origin=%s\n' "$origin_url"

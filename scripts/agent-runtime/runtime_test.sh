@@ -168,6 +168,10 @@ git -C "$fixture_repo" config --local branch.main.mergeOptions '--no-ff -s ours'
 expect_failure "effective branch.main.mergeOptions must be unset" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
 run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --apply >/dev/null
+git -C "$fixture_repo" config --local pull.twohead ours
+expect_failure "effective pull.twohead must be unset" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --apply >/dev/null
 git -C "$fixture_repo" config --local --replace-all remote.origin.fetch \
   '+refs/heads/downstream/main:refs/remotes/origin/main'
 expect_failure "remote.origin.fetch expected exactly one value '+refs/heads/*:refs/remotes/origin/*'" \
@@ -196,6 +200,10 @@ git -C "$fixture_repo" config --worktree branch.main.mergeOptions '--no-ff -s ou
 expect_failure "effective branch.main.mergeOptions must be unset" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
 git -C "$fixture_repo" config --worktree --unset branch.main.mergeOptions
+git -C "$fixture_repo" config --worktree pull.twohead ours
+expect_failure "effective pull.twohead must be unset" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --worktree --unset pull.twohead
 git -C "$fixture_repo" config --worktree remote.origin.mirror true
 expect_failure "effective remote.origin.mirror must be unset" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
@@ -241,6 +249,19 @@ expect_failure "branch.main.remote expected exactly one value 'origin'" \
 run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --apply >/dev/null
 git -C "$fixture_repo" branch main refs/remotes/origin/main
 run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check >/dev/null
+downstream_commit=$(git -C "$fixture_repo" rev-parse refs/heads/downstream/main)
+git -C "$fixture_repo" switch --quiet main
+git -C "$fixture_repo" branch -D downstream/main >/dev/null
+git -C "$fixture_repo" update-ref -d refs/remotes/origin/downstream/main
+git -C "$fixture_repo" config --local branch.downstream/main.remote origin
+git -C "$fixture_repo" config --local branch.downstream/main.merge refs/heads/feature/stale-downstream
+expect_failure "branch.downstream/main.merge expected exactly one value 'refs/heads/downstream/main'" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --apply >/dev/null
+git -C "$fixture_repo" branch downstream/main "$downstream_commit"
+git -C "$fixture_repo" update-ref refs/remotes/origin/downstream/main "$downstream_commit"
+git -C "$fixture_repo" switch --quiet downstream/main
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check >/dev/null
 main_branch_config="$fixture_root/main-branch-config"
 git config --file "$main_branch_config" branch.main.remote upstream
 git config --file "$main_branch_config" branch.main.merge refs/heads/downstream/main
@@ -281,6 +302,12 @@ expect_failure "branch-conditioned safety override" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
 git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
 git config --file "$main_branch_config" --unset-all branch.main.mergeOptions
+git config --file "$main_branch_config" pull.twohead ours
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$main_branch_config"
+expect_failure "branch-conditioned safety override" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+git config --file "$main_branch_config" --unset-all pull.twohead
 git config --file "$main_branch_config" remote.origin.fetch \
   '+refs/heads/downstream/main:refs/remotes/origin/main'
 git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$main_branch_config"
@@ -388,6 +415,18 @@ git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$nested_oute
 expect_failure "branch-conditioned safety override" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
 git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+git config --file "$nested_outer_config" --unset-all \
+  "includeIf.gitdir:$fixture_git_dir.path"
+nested_malformed_include="$fixture_root/nested-malformed-include"
+printf '%s\n' '[unterminated' > "$nested_malformed_include"
+git config --file "$nested_outer_config" \
+  "includeIf.gitdir:$fixture_git_dir.path" "$nested_malformed_include"
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$nested_outer_config"
+expect_failure "cannot evaluate nested conditioned include" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+git config --file "$nested_outer_config" --unset-all \
+  "includeIf.gitdir:$fixture_git_dir.path"
 malformed_include="$fixture_root/malformed-include"
 printf '%s\n' '[unterminated' > "$malformed_include"
 git -C "$fixture_repo" config --local includeIf.onbranch:main.path \
