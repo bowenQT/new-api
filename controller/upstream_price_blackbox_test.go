@@ -75,7 +75,7 @@ func createUserWithPAT(t *testing.T, db *gorm.DB, username string, role int, tok
 	require.NoError(t, db.Create(user).Error)
 }
 
-// TestUpstreamPriceRoutesRootOnly exercises all six catalog routes through
+// TestUpstreamPriceRoutesRootOnly exercises every catalog route through
 // the real production registration (router.SetApiRouter) with the real
 // RootAuth middleware: anonymous 401, common/admin 403, root reaches the
 // handler (HTTP 200 even for business errors, per the ApiError convention).
@@ -113,11 +113,13 @@ func TestUpstreamPriceRoutesRootOnly(t *testing.T) {
 		path   string
 	}{
 		{http.MethodGet, "/api/upstream-price-sources"},
+		{http.MethodGet, "/api/upstream-price-sources/adapters"},
 		{http.MethodPost, "/api/upstream-price-sources"},
 		{http.MethodPut, "/api/upstream-price-sources/999999"},
 		{http.MethodPost, "/api/upstream-price-sources/999999/preview"},
 		{http.MethodPost, "/api/upstream-price-sources/999999/sync"},
 		{http.MethodGet, "/api/upstream-prices/current"},
+		{http.MethodPost, "/api/upstream-prices/compare"},
 	}
 	rootWriteRoutes := 0
 	for _, route := range routes {

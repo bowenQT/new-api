@@ -389,6 +389,8 @@ func projectCatalogEntry(catalogEntry dto.UpstreamCurrentPriceEntry, params bill
 		RunId:             catalogEntry.RunId,
 		RunFinishedAt:     catalogEntry.RunFinishedAt,
 		LastSeenAt:        catalogEntry.LastSeenAt,
+		FetchedAt:         catalogEntry.FetchedAt,
+		EffectiveAt:       catalogEntry.EffectiveAt,
 		Projection:        ProjectionNotConfigured,
 	}
 	if catalogEntry.VariesByProvider {

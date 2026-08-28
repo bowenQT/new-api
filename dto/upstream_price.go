@@ -71,7 +71,22 @@ func (r *UpstreamPriceSyncRequest) Validate() error {
 	return nil
 }
 
+// UpstreamPriceAdapterView describes one registered adapter's non-secret
+// contract so the admin UI builds source forms from the registry instead of a
+// hardcoded adapter table. It never carries credentials; Endpoint is the
+// pinned public catalog URL the adapter fetches from (spec §12).
+type UpstreamPriceAdapterView struct {
+	Key             string   `json:"key"`
+	AllowedRoles    []string `json:"allowed_roles"`
+	AllowedScopes   []string `json:"allowed_scopes"`
+	RequiresChannel bool     `json:"requires_channel"`
+	Endpoint        string   `json:"endpoint"`
+}
+
 // UpstreamPriceSourceView is the admin-facing projection of a price source.
+// The aggregate fields describe the source's last successful run so a list
+// view can show coverage and freshness without a per-source catalog query
+// (spec §8.3).
 type UpstreamPriceSourceView struct {
 	Id                      int    `json:"id"`
 	Name                    string `json:"name"`
@@ -86,8 +101,12 @@ type UpstreamPriceSourceView struct {
 	ConfigRevision          int64  `json:"config_revision"`
 	LastSuccessRunId        *int   `json:"last_success_run_id"`
 	LastSuccessAt           *int64 `json:"last_success_at"`
+	LastSuccessFinishedAt   *int64 `json:"last_success_finished_at"`
 	LastErrorAt             *int64 `json:"last_error_at"`
 	LastErrorSummary        string `json:"last_error_summary"`
+	CoverageCount           int    `json:"coverage_count"`
+	MissingCount            int    `json:"missing_count"`
+	Stale                   bool   `json:"stale"`
 	Orphaned                bool   `json:"orphaned"`
 	CreatedTime             int64  `json:"created_time"`
 	UpdatedTime             int64  `json:"updated_time"`
@@ -292,6 +311,11 @@ type UpstreamPriceCompareSourcePrice struct {
 	RunId             int      `json:"run_id,omitempty"`
 	RunFinishedAt     *int64   `json:"run_finished_at,omitempty"`
 	LastSeenAt        int64    `json:"last_seen_at,omitempty"`
+	// FetchedAt and EffectiveAt come from the underlying snapshot so the
+	// comparison view can label observation age and vendor effective date
+	// (spec §8.3) without a second full catalog request.
+	FetchedAt   int64  `json:"fetched_at,omitempty"`
+	EffectiveAt *int64 `json:"effective_at,omitempty"`
 }
 
 // UpstreamPriceCompareEntry is one model's comparison row (spec §11.2).

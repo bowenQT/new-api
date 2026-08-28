@@ -320,7 +320,7 @@ entries:
     status: active
     owner: downstream-maintainers
     introduced_commit: 53c316bc182853892af75b693c9d4d9150e47aa7
-    purpose: Phase 2 of the upstream price catalog per docs/downstream/upstream-price-catalog-spec.md — billingexpr base-expression projection, the RootAuth cost/sale/margin comparison endpoint, scheduled catalog sync on the existing SystemTask runner (off by default), catalog health alerts, and the models.dev / basellm curated reference adapters. It reads sale-pricing configuration for the comparison projection and still writes none of it.
+    purpose: Phase 2 of the upstream price catalog per docs/downstream/upstream-price-catalog-spec.md — billingexpr base-expression projection, the RootAuth cost/sale/margin comparison endpoint, scheduled catalog sync on the existing SystemTask runner (off by default), catalog health alerts, the models.dev / basellm curated reference adapters, the RootAuth adapter listing endpoint, and the §8.3 freshness fields on the source list and comparison responses. It reads sale-pricing configuration for the comparison projection and still writes none of it.
     paths:
       - pkg/billingexpr/compile.go
       - pkg/billingexpr/project.go
@@ -331,8 +331,10 @@ entries:
       - service/upstreamprice/alerts_test.go
       - service/upstreamprice/compare.go
       - service/upstreamprice/compare_test.go
+      - service/upstreamprice/registry_test.go
       - service/upstreamprice/schedule.go
       - service/upstreamprice/schedule_test.go
+      - service/upstreamprice/source_test.go
       - service/upstreamprice/adapters/curated_reference.go
       - service/upstreamprice/adapters/curated_reference_test.go
       - service/upstreamprice/adapters/scheduled_sync_test.go
@@ -341,7 +343,7 @@ entries:
     upstream_touchpoints:
       - billing expression compiler in pkg/billingexpr (shared requestRuleFactor shape detection and cache invalidation)
       - SystemTask type registry in model/system_task.go and scheduled handler registration in controller/system_task_handlers.go
-      - RootAuth API route group /api/upstream-prices in router/api-router.go
+      - RootAuth API route groups /api/upstream-prices and /api/upstream-price-sources in router/api-router.go, including GET /api/upstream-price-sources/adapters
       - sale-pricing read accessors in setting/ratio_setting and setting/billing_setting
     conflict_risk: medium
     verification:
@@ -387,7 +389,7 @@ entries:
       - generated TanStack route tree in web/src/routeTree.gen.ts
       - shared frontend i18n locale files and the i18n:sync report
       - RootAuth API groups /api/upstream-price-sources and /api/upstream-prices
-      - the adapter registry catalog, which has no HTTP listing endpoint and is therefore restated in web/src/features/price-catalog/constants.ts
+      - the adapter registry catalog, served by GET /api/upstream-price-sources/adapters; web/src/features/price-catalog/constants.ts still holds a local copy until the UI reads that endpoint
     conflict_risk: medium
     verification:
       - cd web && bun run typecheck

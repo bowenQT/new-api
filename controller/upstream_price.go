@@ -17,6 +17,13 @@ import (
 // and never touch sale-pricing configuration; vendor parsing lives in the
 // adapter registry, not here.
 
+// GetUpstreamPriceAdapters lists the registered adapters with the roles,
+// scopes, channel requirement, and pinned endpoint each one accepts, so the
+// admin UI configures sources from the registry rather than a hardcoded copy.
+func GetUpstreamPriceAdapters(c *gin.Context) {
+	common.ApiSuccess(c, upstreamprice.ListAdapters())
+}
+
 func GetUpstreamPriceSources(c *gin.Context) {
 	views, err := upstreamprice.ListPriceSources()
 	if err != nil {

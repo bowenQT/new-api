@@ -73,6 +73,10 @@ func (a *VercelGatewayAdapter) Supports(source upstreamprice.SourceConfig) bool 
 	return source.AdapterKey == a.key
 }
 
+func (a *VercelGatewayAdapter) Endpoint() string {
+	return a.endpoint
+}
+
 // isCanonicalVercelHost accepts only the exact gateway host, refusing forged
 // suffix domains such as "ai-gateway.vercel.sh.evil.example".
 func isCanonicalVercelHost(host string) bool {

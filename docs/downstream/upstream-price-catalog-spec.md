@@ -552,11 +552,16 @@ Phase 3 实施时不能照搬当前前端逐个 option 顺序写入的非原子�
 
 ```text
 GET    /api/upstream-price-sources
+GET    /api/upstream-price-sources/adapters
 POST   /api/upstream-price-sources
 PUT    /api/upstream-price-sources/:id
 ```
 
-三个接口均为 RootAuth。首版不提供硬删除；使用 `enabled=false`。
+四个接口均为 RootAuth。首版不提供硬删除；使用 `enabled=false`。
+
+`GET /api/upstream-price-sources/adapters` 返回注册表中每个 adapter 的 `key`、`allowed_roles`、`allowed_scopes`、`requires_channel` 与固定公开 `endpoint`，供管理界面按注册表构建来源表单，避免前端复制一份 adapter 清单后与后端漂移。该响应只含非敏感信息，绝不包含凭证（§12）。
+
+`GET /api/upstream-price-sources` 的每条记录另带上次成功 run 的聚合：`last_success_finished_at`、`coverage_count`（valid 模型数）、`missing_count` 与按 §8.3 阈值判定的 `stale`，使列表页无需为每个来源再查一次目录。
 
 ### 10.2 同步
 
@@ -584,6 +589,7 @@ Phase 2 实施口径：
 - 模型列表为空表示比较目录中全部 canonical 模型，按名称排序上限 500 条，超出时置 `truncated=true`。
 - 参与毛利的成本只取本次 `last_success_run` 的观察值（current 与 stale）；`missing`（上游已不再返回）不参与最低/最高与毛利。任一贡献成本为 stale、orphaned、canonical 冲突或 `varies_by_provider` 时置 `cost_confirmed=false`。
 - `curated_reference` 与 `vendor_list` 价格单独返回，不参与毛利。
+- 每条来源价格回带该观察值快照自身的 `fetched_at` 与 `effective_at`，使 §8.3 要求的时间标注无需再全量调用 `/current`。
 - 响应携带 §9.3 的完整排除项清单与告警列表；所有金额有界，非有限值一律拒绝。
 
 ### 10.4 销售价候选

@@ -91,6 +91,10 @@ func (a *CuratedReferenceAdapter) Supports(source upstreamprice.SourceConfig) bo
 	return source.AdapterKey == a.key && source.ChannelId == nil
 }
 
+func (a *CuratedReferenceAdapter) Endpoint() string {
+	return a.endpoint
+}
+
 func (a *CuratedReferenceAdapter) validateEndpoint() error {
 	parsed, err := url.Parse(a.endpoint)
 	if err != nil {

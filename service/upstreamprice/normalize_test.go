@@ -108,15 +108,17 @@ func TestMapCanonicalModelName(t *testing.T) {
 }
 
 type fakeAdapter struct {
-	key    string
-	roles  []PriceRole
-	scopes []PriceScope
+	key      string
+	roles    []PriceRole
+	scopes   []PriceScope
+	endpoint string
 }
 
 func (f *fakeAdapter) Key() string                 { return f.key }
 func (f *fakeAdapter) Supports(SourceConfig) bool  { return true }
 func (f *fakeAdapter) AllowedRoles() []PriceRole   { return f.roles }
 func (f *fakeAdapter) AllowedScopes() []PriceScope { return f.scopes }
+func (f *fakeAdapter) Endpoint() string            { return f.endpoint }
 func (f *fakeAdapter) Fetch(context.Context, SourceConfig) ([]Observation, FetchMeta, error) {
 	return nil, FetchMeta{}, nil
 }

@@ -351,3 +351,31 @@ func TestCompareUpstreamPricesGroupSelection(t *testing.T) {
 func floatPtr(value float64) *float64 {
 	return &value
 }
+
+// TestCompareSourcePriceCarriesSnapshotTimestamps pins that a comparison row
+// reports the underlying snapshot's own fetched_at and effective_at, so a
+// caller can label observation age and vendor effective date (spec §8.3)
+// without a second full catalog request.
+func TestCompareSourcePriceCarriesSnapshotTimestamps(t *testing.T) {
+	db := setupCompareTestDB(t)
+	now := common.GetTimestamp()
+	effectiveAt := now - 86400
+
+	channel := &model.Channel{Name: "timestamp-channel", Key: "k", Status: common.ChannelStatusEnabled}
+	require.NoError(t, db.Create(channel).Error)
+	source := seedCatalogSnapshot(t, db, "timestamp-cost", RoleSupplierCost, &channel.Id, "timestamp-model",
+		`tier("base", p * 1 + c * 2)`, FormulaKindTokenExprV1, "", now)
+	require.NoError(t, db.Model(&model.PriceSnapshot{}).Where("source_id = ?", source.Id).
+		Update("effective_at", effectiveAt).Error)
+
+	response, err := CompareUpstreamPrices(&dto.UpstreamPriceCompareRequest{Models: []string{"timestamp-model"}})
+	require.NoError(t, err)
+	require.Len(t, response.Entries, 1)
+	require.Len(t, response.Entries[0].Costs, 1)
+
+	cost := response.Entries[0].Costs[0]
+	assert.Equal(t, now, cost.FetchedAt)
+	assert.Equal(t, now, cost.LastSeenAt)
+	require.NotNil(t, cost.EffectiveAt)
+	assert.Equal(t, effectiveAt, *cost.EffectiveAt)
+}

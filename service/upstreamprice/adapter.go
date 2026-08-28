@@ -206,6 +206,11 @@ type Adapter interface {
 	Fetch(ctx context.Context, source SourceConfig) ([]Observation, FetchMeta, error)
 	AllowedRoles() []PriceRole
 	AllowedScopes() []PriceScope
+	// Endpoint reports the pinned public catalog URL this adapter fetches
+	// from. It is provenance shown to admins, never a configurable value, and
+	// must never carry credentials or query parameters derived from a source
+	// (spec §12). Adapters without a fixed URL return an empty string.
+	Endpoint() string
 }
 
 // ResolveObservationRoleScope implements the single authoritative role/scope

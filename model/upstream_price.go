@@ -229,6 +229,18 @@ func GetRecentSuccessfulPriceSyncRuns(sourceId int, limit int) ([]*PriceSyncRun,
 	return runs, err
 }
 
+// GetPriceSyncRunsByIds loads the named runs in one query so a list view can
+// annotate every source with its last successful run without issuing a query
+// per source.
+func GetPriceSyncRunsByIds(ids []int) ([]*PriceSyncRun, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var runs []*PriceSyncRun
+	err := DB.Where("id IN ?", ids).Find(&runs).Error
+	return runs, err
+}
+
 func GetPriceSyncRunItems(runId int) ([]*PriceSyncRunItem, error) {
 	var items []*PriceSyncRunItem
 	err := DB.Where("run_id = ?", runId).Order("id asc").Find(&items).Error

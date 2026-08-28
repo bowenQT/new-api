@@ -36,6 +36,8 @@ func (a scheduleTestAdapter) AllowedScopes() []PriceScope {
 	return []PriceScope{ScopeUnknown}
 }
 
+func (a scheduleTestAdapter) Endpoint() string { return "" }
+
 func registerScheduleTestAdapter(t *testing.T) string {
 	t.Helper()
 	key := fmt.Sprintf("schedule_test_%d", atomic.AddInt64(&scheduleTestAdapterCounter, 1))
