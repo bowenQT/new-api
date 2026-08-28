@@ -78,7 +78,7 @@ matches_github_repo() {
   return 1
 }
 
-protected_config_regex='^(remote\.upstream\.pushurl|remote\.pushdefault|push\.default|pull\.ff|fetch\.prune|rebase\.autostash|merge\.autostash|merge\.conflictstyle|rerere\.enabled|rerere\.autoupdate|branch\.main\.(remote|merge)|branch\.downstream/main\.(remote|merge))$'
+protected_config_regex='^(remote\.(origin|upstream)\.(url|pushurl)|remote\.pushdefault|url\..*\.(insteadof|pushinsteadof)|push\.default|pull\.ff|fetch\.prune|rebase\.autostash|merge\.autostash|merge\.conflictstyle|rerere\.enabled|rerere\.autoupdate|branch\.main\.(remote|merge)|branch\.downstream/main\.(remote|merge))$'
 conditioned_config_files=()
 
 resolve_include_path() {

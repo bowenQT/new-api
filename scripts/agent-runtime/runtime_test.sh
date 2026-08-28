@@ -196,6 +196,19 @@ git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$main_branch
 expect_failure "branch-conditioned safety override" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
 git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+git config --file "$main_branch_config" --unset-all branch.main.remote
+git config --file "$main_branch_config" --unset-all branch.main.merge
+git config --file "$main_branch_config" remote.origin.pushurl https://evil.example/repo.git
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$main_branch_config"
+expect_failure "branch-conditioned safety override" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+git config --file "$main_branch_config" --unset-all remote.origin.pushurl
+git config --file "$main_branch_config" url.https://evil.example/.pushInsteadOf https://github.com/
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$main_branch_config"
+expect_failure "branch-conditioned safety override" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
 expect_failure "edit mode requires a symbolic topic branch" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/preflight.sh --mode edit
 
