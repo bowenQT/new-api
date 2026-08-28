@@ -43,3 +43,23 @@ entries:
       - local and public health plus unauthenticated API rejection after deployment
     removal_condition: Remove only if the SGP1 deployment is retired or replaced by an equivalent reviewed downstream deployment profile.
     upstream_reference: null
+
+  - id: upstream-price-catalog-phase1
+    status: active
+    owner: downstream-maintainers
+    introduced_commit: f59e9d3545a3ea0a64542b7dbfd3f5b7779f9799
+    purpose: Read-only upstream price catalog (PriceSource/PriceSnapshot/PriceSyncRun models, adapter registry with the Vercel AI Gateway cost adapter, manual preview/sync, current-price query) per docs/downstream/upstream-price-catalog-spec.md Phase 1, without touching any sale-pricing configuration.
+    paths:
+      - model/main.go
+      - router/api-router.go
+    upstream_touchpoints:
+      - GORM AutoMigrate registration in model/main.go (migrateDB and migrateDBFast lists)
+      - RootAuth API route groups /api/upstream-price-sources and /api/upstream-prices in router/api-router.go
+    conflict_risk: low
+    verification:
+      - go build ./... and go vet ./...
+      - go test ./service/upstreamprice/... ./model/ ./controller/ -count=1
+      - billing isolation regression in service/upstreamprice/adapters asserting byte-identical ratio/billing setting exports and unchanged billing read-path values across a full sync
+      - RootAuth black-box tests in controller/upstream_price_blackbox_test.go (root-only routes, no cost fields on /api/pricing)
+    removal_condition: Remove only if the upstream price catalog feature is retired or upstream ships an equivalent vendor-agnostic price source catalog.
+    upstream_reference: null
