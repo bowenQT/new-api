@@ -5465,6 +5465,16 @@
     "We could not load price sources.": "We could not load price sources.",
     "We could not load the price catalog.": "We could not load the price catalog.",
     "Worst-case margin": "Worst-case margin",
-    "Set an interval of at least {{hours}} hours in Edit before scheduling.": "Set an interval of at least {{hours}} hours in Edit before scheduling."
+    "Set an interval of at least {{hours}} hours in Edit before scheduling.": "Set an interval of at least {{hours}} hours in Edit before scheduling.",
+    "We could not load adapters.": "We could not load adapters.",
+    "Loading the registered adapters...": "Loading the registered adapters...",
+    "No adapter is registered on this server.": "No adapter is registered on this server.",
+    "This adapter admits more than one combination. Only the values listed here are accepted.": "This adapter admits more than one combination. Only the values listed here are accepted.",
+    "Select a scope": "Select a scope",
+    "Role is required": "Role is required",
+    "Scope is required": "Scope is required",
+    "This adapter does not allow the selected role": "This adapter does not allow the selected role",
+    "This adapter does not allow the selected scope": "This adapter does not allow the selected scope",
+    "Catalog health alerts could not be loaded, so this list may be missing warnings.": "Catalog health alerts could not be loaded, so this list may be missing warnings."
   }
 }

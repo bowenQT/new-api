@@ -5465,6 +5465,16 @@
     "We could not load price sources.": "Impossible de charger les sources de prix.",
     "We could not load the price catalog.": "Impossible de charger le catalogue de prix.",
     "Worst-case margin": "Marge dans le pire des cas",
-    "Set an interval of at least {{hours}} hours in Edit before scheduling.": "Définissez un intervalle d'au moins {{hours}} heures dans Modifier avant de planifier."
+    "Set an interval of at least {{hours}} hours in Edit before scheduling.": "Définissez un intervalle d'au moins {{hours}} heures dans Modifier avant de planifier.",
+    "We could not load adapters.": "Impossible de charger les adaptateurs.",
+    "Loading the registered adapters...": "Chargement des adaptateurs enregistrés…",
+    "No adapter is registered on this server.": "Aucun adaptateur n'est enregistré sur ce serveur.",
+    "This adapter admits more than one combination. Only the values listed here are accepted.": "Cet adaptateur admet plusieurs combinaisons. Seules les valeurs listées ici sont acceptées.",
+    "Select a scope": "Sélectionner une portée",
+    "Role is required": "Le rôle est requis",
+    "Scope is required": "La portée est requise",
+    "This adapter does not allow the selected role": "Cet adaptateur n'autorise pas le rôle sélectionné",
+    "This adapter does not allow the selected scope": "Cet adaptateur n'autorise pas la portée sélectionnée",
+    "Catalog health alerts could not be loaded, so this list may be missing warnings.": "Les alertes de santé du catalogue n'ont pas pu être chargées ; cette liste peut omettre des avertissements."
   }
 }

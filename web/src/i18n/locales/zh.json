@@ -5465,6 +5465,16 @@
     "We could not load price sources.": "无法加载价格来源。",
     "We could not load the price catalog.": "无法加载价格目录。",
     "Worst-case margin": "最差毛利",
-    "Set an interval of at least {{hours}} hours in Edit before scheduling.": "启用定时同步前，请先在「编辑」中把间隔设为至少 {{hours}} 小时。"
+    "Set an interval of at least {{hours}} hours in Edit before scheduling.": "启用定时同步前，请先在「编辑」中把间隔设为至少 {{hours}} 小时。",
+    "We could not load adapters.": "无法加载适配器列表。",
+    "Loading the registered adapters...": "正在加载已注册的适配器…",
+    "No adapter is registered on this server.": "该服务器没有注册任何适配器。",
+    "This adapter admits more than one combination. Only the values listed here are accepted.": "该适配器允许多种组合，只有这里列出的取值会被接受。",
+    "Select a scope": "选择作用域",
+    "Role is required": "必须选择角色",
+    "Scope is required": "必须选择作用域",
+    "This adapter does not allow the selected role": "该适配器不允许所选的角色",
+    "This adapter does not allow the selected scope": "该适配器不允许所选的作用域",
+    "Catalog health alerts could not be loaded, so this list may be missing warnings.": "价目健康告警未能加载，此列表可能缺少警告信息。"
   }
 }

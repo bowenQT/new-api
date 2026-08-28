@@ -40,15 +40,15 @@ import { cn } from '@/lib/utils'
 
 import { getCurrentPrices, listPriceSources, updatePriceSource } from '../api'
 import {
+  ADAPTER_LABELS,
   MIN_SCHEDULE_INTERVAL_SECONDS,
-  findAdapterOption,
   priceCatalogQueryKeys,
 } from '../constants'
 import {
   formValuesToPriceSourcePayload,
   priceSourceToFormValues,
 } from '../lib/source-form'
-import type { PriceSourceRow, PriceSourceView } from '../types'
+import type { PriceAlert, PriceSourceView } from '../types'
 import { CatalogAlerts } from './catalog-alerts'
 import { RoleBadge, ScopeBadge, CatalogFlagBadges } from './catalog-badges'
 import { PriceSourceMutateDrawer } from './price-source-mutate-drawer'
@@ -78,9 +78,10 @@ export function PriceSourcesPanel() {
     retry: false,
   })
 
-  // Coverage, freshness and health are properties of the catalog projection,
-  // not of the source record, so they come from the current-price endpoint.
-  const catalogQuery = useQuery({
+  // Coverage, freshness and the last successful run come from the source list
+  // itself (spec §8.3). Only the catalog health alerts still need the
+  // current-price projection, because no per-source endpoint carries them.
+  const alertsQuery = useQuery({
     queryKey: priceCatalogQueryKeys.currentPrices,
     queryFn: async () => {
       const res = await getCurrentPrices()
@@ -133,35 +134,37 @@ export function PriceSourcesPanel() {
     },
   })
 
-  const rows = useMemo<PriceSourceRow[]>(() => {
-    const sources = sourcesQuery.data ?? []
-    const entries = catalogQuery.data?.entries ?? []
-    const alerts = catalogQuery.data?.alerts ?? []
+  const catalogAlerts = useMemo(
+    () => alertsQuery.data?.alerts ?? [],
+    [alertsQuery.data]
+  )
+  const alertsBySource = useMemo(() => {
+    const index = new Map<number, PriceAlert[]>()
+    for (const alert of catalogAlerts) {
+      if (!alert.source_id) continue
+      const existing = index.get(alert.source_id)
+      if (existing) existing.push(alert)
+      else index.set(alert.source_id, [alert])
+    }
+    return index
+  }, [catalogAlerts])
 
-    return sources.map((source) => {
-      const own = entries.filter((entry) => entry.source_id === source.id)
-      const covered = new Set(
-        own
-          .filter((entry) => entry.status === 'current')
-          .map((entry) => entry.canonical_model_name || entry.source_model_name)
-      )
-      return {
-        source,
-        coveredModels: covered.size,
-        missingModels: own.filter((entry) => entry.status === 'missing').length,
-        stale: own.some((entry) => entry.stale),
-        alerts: alerts.filter((alert) => alert.source_id === source.id),
-      }
-    })
-  }, [catalogQuery.data, sourcesQuery.data])
-
-  const catalogAlerts = catalogQuery.data?.alerts ?? []
-  const loading = sourcesQuery.isLoading || catalogQuery.isLoading
+  const sources = sourcesQuery.data ?? []
+  // The source list is the page's own data; a failing alerts query degrades to
+  // an unannotated table rather than hiding the sources behind a skeleton.
+  const loading = sourcesQuery.isLoading
   const refreshing =
-    (sourcesQuery.isFetching || catalogQuery.isFetching) && !loading
+    (sourcesQuery.isFetching || alertsQuery.isFetching) && !loading
 
   return (
     <div className='space-y-4'>
+      {alertsQuery.isError && (
+        <p className='text-warning text-xs'>
+          {t(
+            'Catalog health alerts could not be loaded, so this list may be missing warnings.'
+          )}
+        </p>
+      )}
       <CatalogAlerts alerts={catalogAlerts} />
 
       <section className='bg-card overflow-hidden rounded-lg border shadow-xs'>
@@ -181,9 +184,9 @@ export function PriceSourcesPanel() {
               size='sm'
               onClick={() => {
                 void sourcesQuery.refetch()
-                void catalogQuery.refetch()
+                void alertsQuery.refetch()
               }}
-              disabled={sourcesQuery.isFetching || catalogQuery.isFetching}
+              disabled={sourcesQuery.isFetching || alertsQuery.isFetching}
             >
               <RefreshCw
                 data-icon='inline-start'
@@ -210,7 +213,7 @@ export function PriceSourcesPanel() {
           </div>
         </div>
 
-        <div aria-busy={sourcesQuery.isFetching || catalogQuery.isFetching}>
+        <div aria-busy={sourcesQuery.isFetching || alertsQuery.isFetching}>
           {loading && (
             <div className='space-y-2 p-4 sm:p-5'>
               {['a', 'b', 'c'].map((slot) => (
@@ -234,13 +237,13 @@ export function PriceSourcesPanel() {
             />
           )}
 
-          {!loading && !sourcesQuery.isError && rows.length === 0 && (
+          {!loading && !sourcesQuery.isError && sources.length === 0 && (
             <p className='text-muted-foreground px-4 py-10 text-center text-sm sm:px-5'>
               {t('No price source has been registered yet.')}
             </p>
           )}
 
-          {!loading && !sourcesQuery.isError && rows.length > 0 && (
+          {!loading && !sourcesQuery.isError && sources.length > 0 && (
             <div className='overflow-x-auto'>
               <Table className='min-w-[1180px]'>
                 <TableHeader>
@@ -278,28 +281,28 @@ export function PriceSourcesPanel() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {rows.map((row) => {
-                    const source = row.source
-                    const adapter = findAdapterOption(source.adapter_key)
+                  {sources.map((source) => {
+                    const sourceAlerts = alertsBySource.get(source.id) ?? []
                     return (
                       <TableRow key={source.id} className='hover:bg-muted/30'>
                         <TableCell className='px-4 py-3 align-top'>
                           <div className='space-y-1'>
                             <div className='font-medium'>{source.name}</div>
                             <div className='text-muted-foreground font-mono text-[11px]'>
-                              {adapter ? adapter.label : source.adapter_key}
+                              {ADAPTER_LABELS[source.adapter_key] ??
+                                source.adapter_key}
                               {' · '}
                               {source.adapter_key}
                             </div>
                             <CatalogFlagBadges
                               flags={{
-                                stale: row.stale,
+                                stale: source.stale,
                                 orphaned: source.orphaned,
-                                missing: row.missingModels > 0,
+                                missing: source.missing_count > 0,
                               }}
                               className='flex flex-wrap gap-1'
                             />
-                            {row.alerts.map((alert) => (
+                            {sourceAlerts.map((alert) => (
                               <div
                                 key={`${alert.code}-${alert.detail}`}
                                 className='text-destructive text-[11px]'
@@ -323,20 +326,22 @@ export function PriceSourcesPanel() {
                         <TableCell className='py-3 align-top text-xs tabular-nums'>
                           <div>
                             {t('{{count}} models', {
-                              count: row.coveredModels,
+                              count: source.coverage_count,
                             })}
                           </div>
-                          {row.missingModels > 0 && (
+                          {source.missing_count > 0 && (
                             <div className='text-warning'>
                               {t('{{count}} missing', {
-                                count: row.missingModels,
+                                count: source.missing_count,
                               })}
                             </div>
                           )}
                         </TableCell>
                         <TableCell className='text-muted-foreground py-3 align-top text-xs'>
-                          {source.last_success_at
-                            ? formatTimestampToDate(source.last_success_at)
+                          {source.last_success_finished_at
+                            ? formatTimestampToDate(
+                                source.last_success_finished_at
+                              )
                             : t('Never')}
                           {source.last_success_run_id ? (
                             <div className='font-mono text-[11px]'>

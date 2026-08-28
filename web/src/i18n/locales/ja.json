@@ -5465,6 +5465,16 @@
     "We could not load price sources.": "価格ソースを読み込めませんでした。",
     "We could not load the price catalog.": "価格カタログを読み込めませんでした。",
     "Worst-case margin": "最悪ケースの粗利",
-    "Set an interval of at least {{hours}} hours in Edit before scheduling.": "スケジュールを有効にする前に、「編集」で間隔を {{hours}} 時間以上に設定してください。"
+    "Set an interval of at least {{hours}} hours in Edit before scheduling.": "スケジュールを有効にする前に、「編集」で間隔を {{hours}} 時間以上に設定してください。",
+    "We could not load adapters.": "アダプターを読み込めませんでした。",
+    "Loading the registered adapters...": "登録済みアダプターを読み込み中…",
+    "No adapter is registered on this server.": "このサーバーにはアダプターが登録されていません。",
+    "This adapter admits more than one combination. Only the values listed here are accepted.": "このアダプターは複数の組み合わせを許可します。ここに表示された値のみが受け付けられます。",
+    "Select a scope": "スコープを選択",
+    "Role is required": "ロールは必須です",
+    "Scope is required": "スコープは必須です",
+    "This adapter does not allow the selected role": "このアダプターは選択されたロールを許可していません",
+    "This adapter does not allow the selected scope": "このアダプターは選択されたスコープを許可していません",
+    "Catalog health alerts could not be loaded, so this list may be missing warnings.": "カタログのヘルスアラートを読み込めなかったため、この一覧には警告が欠けている可能性があります。"
   }
 }

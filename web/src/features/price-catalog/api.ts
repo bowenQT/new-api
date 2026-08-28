@@ -21,6 +21,7 @@ import { api } from '@/lib/api'
 import type {
   ApiEnvelope,
   CurrentPriceResponse,
+  PriceAdapterView,
   PriceCompareRequest,
   PriceCompareResponse,
   PricePreviewResponse,
@@ -40,6 +41,18 @@ export async function listPriceSources(): Promise<
   ApiEnvelope<PriceSourceView[]>
 > {
   const res = await api.get('/api/upstream-price-sources')
+  return res.data
+}
+
+/**
+ * The registered adapters with the role, scope, channel and endpoint contract
+ * each one admits (spec §12). The source form is built from this response, so
+ * the client never proposes a combination the server would refuse.
+ */
+export async function listPriceAdapters(): Promise<
+  ApiEnvelope<PriceAdapterView[]>
+> {
+  const res = await api.get('/api/upstream-price-sources/adapters')
   return res.data
 }
 

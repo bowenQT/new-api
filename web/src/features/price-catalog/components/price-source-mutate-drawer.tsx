@@ -17,9 +17,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { CalendarClock, Settings2 } from 'lucide-react'
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useForm, type Resolver } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -61,20 +61,22 @@ import {
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 
-import { createPriceSource, updatePriceSource } from '../api'
+import { createPriceSource, listPriceAdapters, updatePriceSource } from '../api'
 import {
-  ADAPTER_OPTIONS,
+  ADAPTER_LABELS,
   DEFAULT_SCHEDULE_INTERVAL_SECONDS,
   MIN_SCHEDULE_INTERVAL_SECONDS,
   ROLE_LABEL_KEYS,
   SCOPE_LABEL_KEYS,
-  findAdapterOption,
+  priceCatalogQueryKeys,
 } from '../constants'
 import {
   PRICE_SOURCE_FORM_DEFAULTS,
+  findPriceAdapter,
   formValuesToPriceSourcePayload,
   getPriceSourceFormSchema,
   priceSourceToFormValues,
+  priceSourceUsesChannel,
   type PriceSourceFormValues,
 } from '../lib/source-form'
 import type { PriceSourceView } from '../types'
@@ -91,30 +93,63 @@ export function PriceSourceMutateDrawer(props: Props) {
   const { t } = useTranslation()
   const isEdit = props.source !== undefined
 
+  // The adapter contract is registry state, not user data: it changes only on
+  // a backend release, so one cached fetch serves every open of the drawer.
+  const adaptersQuery = useQuery({
+    queryKey: priceCatalogQueryKeys.adapters,
+    queryFn: async () => {
+      const res = await listPriceAdapters()
+      if (!res.success) {
+        throw new Error(res.message || t('We could not load adapters.'))
+      }
+      return res.data ?? []
+    },
+    retry: false,
+    staleTime: 30 * 60 * 1000,
+  })
+  const adapters = useMemo(() => adaptersQuery.data ?? [], [adaptersQuery.data])
+
   const form = useForm<PriceSourceFormValues>({
     resolver: zodResolver(
-      getPriceSourceFormSchema(t)
+      getPriceSourceFormSchema(t, adapters)
     ) as unknown as Resolver<PriceSourceFormValues>,
     defaultValues: PRICE_SOURCE_FORM_DEFAULTS,
   })
 
   useEffect(() => {
     if (!props.open) return
+    if (props.source) {
+      form.reset(priceSourceToFormValues(props.source))
+      return
+    }
+    const first = adapters[0]
     form.reset(
-      props.source
-        ? priceSourceToFormValues(props.source)
+      first
+        ? {
+            ...PRICE_SOURCE_FORM_DEFAULTS,
+            adapter_key: first.key,
+            role: first.allowed_roles[0] ?? '',
+            scope: first.allowed_scopes[0] ?? '',
+          }
         : PRICE_SOURCE_FORM_DEFAULTS
     )
-  }, [form, props.open, props.source])
+  }, [adapters, form, props.open, props.source])
 
   const adapterKey = form.watch('adapter_key')
+  const role = form.watch('role')
+  const scope = form.watch('scope')
   const scheduleEnabled = form.watch('schedule_enabled')
   const intervalSeconds = form.watch('schedule_interval_seconds')
-  const adapter = findAdapterOption(adapterKey)
+  const adapter = findPriceAdapter(adapters, adapterKey)
+  const roleOptions = adapter?.allowed_roles ?? []
+  const scopeOptions = adapter?.allowed_scopes ?? []
 
   const saveMutation = useMutation({
     mutationFn: async (values: PriceSourceFormValues) => {
-      const payload = formValuesToPriceSourcePayload(values)
+      const payload = formValuesToPriceSourcePayload(
+        values,
+        findPriceAdapter(adapters, values.adapter_key)
+      )
       const res = props.source
         ? await updatePriceSource(props.source.id, payload)
         : await createPriceSource(payload)
@@ -192,12 +227,30 @@ export function PriceSourceMutateDrawer(props: Props) {
                   <FormItem>
                     <FormLabel>{t('Adapter')}</FormLabel>
                     <Select
-                      items={ADAPTER_OPTIONS.map((option) => ({
+                      items={adapters.map((option) => ({
                         value: option.key,
-                        label: option.label,
+                        label: ADAPTER_LABELS[option.key] ?? option.key,
                       }))}
                       value={field.value}
-                      onValueChange={field.onChange}
+                      onValueChange={(value) => {
+                        field.onChange(value ?? '')
+                        // The new adapter may not admit the role or scope the
+                        // previous one did, so fall back to its first entry
+                        // instead of leaving a combination the server refuses.
+                        const next = findPriceAdapter(adapters, value ?? '')
+                        if (!next) return
+                        if (
+                          !next.allowed_roles.includes(form.getValues('role'))
+                        ) {
+                          form.setValue('role', next.allowed_roles[0] ?? '')
+                        }
+                        if (
+                          !next.allowed_scopes.includes(form.getValues('scope'))
+                        ) {
+                          form.setValue('scope', next.allowed_scopes[0] ?? '')
+                        }
+                      }}
+                      disabled={adaptersQuery.isPending}
                     >
                       <FormControl>
                         <SelectTrigger>
@@ -205,9 +258,9 @@ export function PriceSourceMutateDrawer(props: Props) {
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent alignItemWithTrigger={false}>
-                        {ADAPTER_OPTIONS.map((option) => (
+                        {adapters.map((option) => (
                           <SelectItem key={option.key} value={option.key}>
-                            {option.label}
+                            {ADAPTER_LABELS[option.key] ?? option.key}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -224,23 +277,125 @@ export function PriceSourceMutateDrawer(props: Props) {
                 )}
               />
 
+              {adaptersQuery.isPending && (
+                <p className='text-muted-foreground text-xs'>
+                  {t('Loading the registered adapters...')}
+                </p>
+              )}
+              {adaptersQuery.isError && (
+                <p className='text-destructive text-xs'>
+                  {t('We could not load adapters.')}
+                </p>
+              )}
+              {!adaptersQuery.isPending &&
+                !adaptersQuery.isError &&
+                adapters.length === 0 && (
+                  <p className='text-muted-foreground text-xs'>
+                    {t('No adapter is registered on this server.')}
+                  </p>
+                )}
+
               {adapter && (
-                <div className='bg-muted/40 grid gap-1 rounded-md border p-3 text-xs'>
-                  <p className='text-muted-foreground'>
-                    {t(
-                      'Role and scope are fixed by the adapter and cannot be chosen freely.'
-                    )}
-                  </p>
-                  <p>
-                    <span className='text-muted-foreground'>{t('Role')}: </span>
-                    {t(ROLE_LABEL_KEYS[adapter.role] ?? adapter.role)}
-                    <span className='text-muted-foreground'>
-                      {' · '}
-                      {t('Scope')}:{' '}
-                    </span>
-                    {t(SCOPE_LABEL_KEYS[adapter.scope] ?? adapter.scope)}
-                  </p>
-                  {adapter.role === 'curated_reference' && (
+                <div className='bg-muted/40 grid gap-2 rounded-md border p-3 text-xs'>
+                  {roleOptions.length <= 1 && scopeOptions.length <= 1 ? (
+                    <>
+                      <p className='text-muted-foreground'>
+                        {t(
+                          'Role and scope are fixed by the adapter and cannot be chosen freely.'
+                        )}
+                      </p>
+                      <p>
+                        <span className='text-muted-foreground'>
+                          {t('Role')}:{' '}
+                        </span>
+                        {t(ROLE_LABEL_KEYS[role] ?? role)}
+                        <span className='text-muted-foreground'>
+                          {' · '}
+                          {t('Scope')}:{' '}
+                        </span>
+                        {t(SCOPE_LABEL_KEYS[scope] ?? scope)}
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className='text-muted-foreground'>
+                        {t(
+                          'This adapter admits more than one combination. Only the values listed here are accepted.'
+                        )}
+                      </p>
+                      {roleOptions.length > 1 && (
+                        <FormField
+                          control={form.control}
+                          name='role'
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>{t('Role')}</FormLabel>
+                              <Select
+                                items={roleOptions.map((value) => ({
+                                  value,
+                                  label: t(ROLE_LABEL_KEYS[value] ?? value),
+                                }))}
+                                value={field.value}
+                                onValueChange={field.onChange}
+                              >
+                                <FormControl>
+                                  <SelectTrigger>
+                                    <SelectValue
+                                      placeholder={t('Select a role')}
+                                    />
+                                  </SelectTrigger>
+                                </FormControl>
+                                <SelectContent alignItemWithTrigger={false}>
+                                  {roleOptions.map((value) => (
+                                    <SelectItem key={value} value={value}>
+                                      {t(ROLE_LABEL_KEYS[value] ?? value)}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      )}
+                      {scopeOptions.length > 1 && (
+                        <FormField
+                          control={form.control}
+                          name='scope'
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>{t('Scope')}</FormLabel>
+                              <Select
+                                items={scopeOptions.map((value) => ({
+                                  value,
+                                  label: t(SCOPE_LABEL_KEYS[value] ?? value),
+                                }))}
+                                value={field.value}
+                                onValueChange={field.onChange}
+                              >
+                                <FormControl>
+                                  <SelectTrigger>
+                                    <SelectValue
+                                      placeholder={t('Select a scope')}
+                                    />
+                                  </SelectTrigger>
+                                </FormControl>
+                                <SelectContent alignItemWithTrigger={false}>
+                                  {scopeOptions.map((value) => (
+                                    <SelectItem key={value} value={value}>
+                                      {t(SCOPE_LABEL_KEYS[value] ?? value)}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      )}
+                    </>
+                  )}
+                  {role === 'curated_reference' && (
                     <p className='text-warning'>
                       {t(
                         'This is a third-party compilation, not an official vendor price.'
@@ -250,7 +405,7 @@ export function PriceSourceMutateDrawer(props: Props) {
                 </div>
               )}
 
-              {adapter?.requiresChannel && (
+              {priceSourceUsesChannel(role, adapter) && (
                 <FormField
                   control={form.control}
                   name='channel_id'

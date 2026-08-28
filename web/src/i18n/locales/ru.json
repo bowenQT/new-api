@@ -4111,7 +4111,7 @@
     "Select a model to edit pricing": "Выберите модель для редактирования тарифа",
     "Select a preset...": "Выберите предустановку...",
     "Select a product": "Выберите продукт",
-    "Select a role": "Выбрать роль",
+    "Select a role": "Выберите роль",
     "Select a rule to edit.": "Выберите правило для редактирования.",
     "Select a store": "Выберите магазин",
     "Select a timestamp before clearing logs.": "Выберите временную метку перед очисткой журналов.",
@@ -5465,6 +5465,16 @@
     "We could not load price sources.": "Не удалось загрузить источники цен.",
     "We could not load the price catalog.": "Не удалось загрузить каталог цен.",
     "Worst-case margin": "Маржа в худшем случае",
-    "Set an interval of at least {{hours}} hours in Edit before scheduling.": "Перед включением расписания задайте интервал не менее {{hours}} ч в разделе «Изменить»."
+    "Set an interval of at least {{hours}} hours in Edit before scheduling.": "Перед включением расписания задайте интервал не менее {{hours}} ч в разделе «Изменить».",
+    "We could not load adapters.": "Не удалось загрузить адаптеры.",
+    "Loading the registered adapters...": "Загрузка зарегистрированных адаптеров…",
+    "No adapter is registered on this server.": "На этом сервере не зарегистрировано ни одного адаптера.",
+    "This adapter admits more than one combination. Only the values listed here are accepted.": "Этот адаптер допускает несколько комбинаций. Принимаются только перечисленные здесь значения.",
+    "Select a scope": "Выберите область",
+    "Role is required": "Роль обязательна",
+    "Scope is required": "Область обязательна",
+    "This adapter does not allow the selected role": "Этот адаптер не допускает выбранную роль",
+    "This adapter does not allow the selected scope": "Этот адаптер не допускает выбранную область",
+    "Catalog health alerts could not be loaded, so this list may be missing warnings.": "Не удалось загрузить оповещения о состоянии каталога, поэтому в этом списке могут отсутствовать предупреждения."
   }
 }

@@ -43,7 +43,21 @@ export type PriceScope =
   | 'unknown'
   | (string & {})
 
-/** `dto.UpstreamPriceSourceView` */
+/** `dto.UpstreamPriceAdapterView` */
+export interface PriceAdapterView {
+  key: string
+  allowed_roles: PriceRole[]
+  allowed_scopes: PriceScope[]
+  requires_channel: boolean
+  endpoint: string
+}
+
+/**
+ * `dto.UpstreamPriceSourceView`. `coverage_count`, `missing_count`, `stale` and
+ * `last_success_finished_at` are the aggregates of the source's last successful
+ * run (spec §8.3); they are always present, so a list view never has to derive
+ * freshness from the current-price projection.
+ */
 export interface PriceSourceView {
   id: number
   name: string
@@ -58,8 +72,12 @@ export interface PriceSourceView {
   config_revision: number
   last_success_run_id?: number | null
   last_success_at?: number | null
+  last_success_finished_at?: number | null
   last_error_at?: number | null
   last_error_summary: string
+  coverage_count: number
+  missing_count: number
+  stale: boolean
   orphaned: boolean
   created_time: number
   updated_time: number
@@ -213,6 +231,12 @@ export interface PriceCompareSourcePrice {
   run_id?: number
   run_finished_at?: number
   last_seen_at?: number
+  /**
+   * Snapshot observation age and vendor effective date (spec §8.3). Both are
+   * `omitempty`, so an unknown value arrives as `undefined` rather than 0.
+   */
+  fetched_at?: number
+  effective_at?: number
 }
 
 /** `dto.UpstreamPriceCompareEntry` */
@@ -246,16 +270,4 @@ export interface PriceCompareResponse {
   excluded_factors: string[] | null
   entries: PriceCompareEntry[] | null
   alerts: PriceAlert[] | null
-}
-
-/** One source row joined with the catalog facts derived from the current-price projection. */
-export interface PriceSourceRow {
-  source: PriceSourceView
-  /** Distinct canonical (or source) model names currently covered by this source. */
-  coveredModels: number
-  /** Current entries labeled `missing` by the last successful run. */
-  missingModels: number
-  /** True when the last successful run of this source is past its staleness threshold. */
-  stale: boolean
-  alerts: PriceAlert[]
 }

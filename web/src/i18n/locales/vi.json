@@ -5465,6 +5465,16 @@
     "We could not load price sources.": "Không thể tải nguồn giá.",
     "We could not load the price catalog.": "Không thể tải danh mục giá.",
     "Worst-case margin": "Biên lợi nhuận xấu nhất",
-    "Set an interval of at least {{hours}} hours in Edit before scheduling.": "Hãy đặt khoảng thời gian ít nhất {{hours}} giờ trong mục Sửa trước khi lập lịch."
+    "Set an interval of at least {{hours}} hours in Edit before scheduling.": "Hãy đặt khoảng thời gian ít nhất {{hours}} giờ trong mục Sửa trước khi lập lịch.",
+    "We could not load adapters.": "Không thể tải danh sách bộ điều hợp.",
+    "Loading the registered adapters...": "Đang tải các bộ điều hợp đã đăng ký…",
+    "No adapter is registered on this server.": "Máy chủ này chưa đăng ký bộ điều hợp nào.",
+    "This adapter admits more than one combination. Only the values listed here are accepted.": "Bộ điều hợp này cho phép nhiều tổ hợp. Chỉ các giá trị liệt kê ở đây mới được chấp nhận.",
+    "Select a scope": "Chọn phạm vi",
+    "Role is required": "Bắt buộc chọn vai trò",
+    "Scope is required": "Bắt buộc chọn phạm vi",
+    "This adapter does not allow the selected role": "Bộ điều hợp này không cho phép vai trò đã chọn",
+    "This adapter does not allow the selected scope": "Bộ điều hợp này không cho phép phạm vi đã chọn",
+    "Catalog health alerts could not be loaded, so this list may be missing warnings.": "Không thể tải cảnh báo tình trạng danh mục, vì vậy danh sách này có thể thiếu cảnh báo."
   }
 }

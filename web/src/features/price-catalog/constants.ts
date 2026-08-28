@@ -16,8 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { PriceRole, PriceScope } from './types'
-
 /**
  * Shortest per-source scheduling interval, mirroring
  * `upstreamprice.MinScheduleIntervalSeconds` (spec §8.4). The server enforces
@@ -45,58 +43,22 @@ export const DEFAULT_COMPARE_USAGE = {
 export const DEFAULT_COMPARE_GROUP = 'default'
 
 /**
- * Adapter catalog.
- *
- * The backend registry (`service/upstreamprice/registry.go`) is not exposed
- * over HTTP, so the admissible role/scope/channel combination of each
- * registered adapter is restated here to keep the form from proposing a
- * combination the server will reject. Keep this in sync with the adapters
- * under `service/upstreamprice/adapters/`.
+ * The role that binds a source to a channel (spec §4.1). Only a
+ * `supplier_cost` source may carry a channel id, and it must carry one.
  */
-export interface AdapterOption {
-  key: string
-  /**
-   * Human-readable adapter name. It is a product name, so it stays
-   * untranslated and is rendered directly rather than through `t()`.
-   */
-  label: string
-  role: PriceRole
-  scope: PriceScope
-  /** True when the adapter's role requires a linked channel (`supplier_cost`). */
-  requiresChannel: boolean
-  /** Canonical endpoint the adapter is pinned to, shown for transparency. */
-  endpoint: string
-}
+export const PRICE_ROLE_SUPPLIER_COST = 'supplier_cost'
 
-export const ADAPTER_OPTIONS: AdapterOption[] = [
-  {
-    key: 'vercel_gateway',
-    label: 'Vercel AI Gateway',
-    role: 'supplier_cost',
-    scope: 'public',
-    requiresChannel: true,
-    endpoint: 'https://ai-gateway.vercel.sh/v1/models',
-  },
-  {
-    key: 'models_dev',
-    label: 'models.dev',
-    role: 'curated_reference',
-    scope: 'unknown',
-    requiresChannel: false,
-    endpoint: 'https://models.dev/api.json',
-  },
-  {
-    key: 'basellm',
-    label: 'basellm llm-metadata',
-    role: 'curated_reference',
-    scope: 'unknown',
-    requiresChannel: false,
-    endpoint: 'https://basellm.github.io/llm-metadata/api/all.json',
-  },
-]
-
-export function findAdapterOption(key: string): AdapterOption | undefined {
-  return ADAPTER_OPTIONS.find((option) => option.key === key)
+/**
+ * Display names of the registered adapters. The adapter contract itself
+ * (roles, scopes, channel requirement, endpoint) comes from
+ * `GET /api/upstream-price-sources/adapters`; only the product name is local,
+ * because it is a brand and is rendered untranslated. An unknown key falls
+ * back to the key.
+ */
+export const ADAPTER_LABELS: Record<string, string> = {
+  vercel_gateway: 'Vercel AI Gateway',
+  models_dev: 'models.dev',
+  basellm: 'basellm llm-metadata',
 }
 
 /** i18n source keys for `PriceRole` (spec §4.1). */
@@ -169,6 +131,7 @@ export const EXCLUDED_FACTOR_LABEL_KEYS: Record<string, string> = {
 
 export const priceCatalogQueryKeys = {
   sources: ['price-catalog', 'sources'] as const,
+  adapters: ['price-catalog', 'adapters'] as const,
   currentPrices: ['price-catalog', 'current-prices'] as const,
   compare: (group: string, usageKey: string, modelsKey: string) =>
     ['price-catalog', 'compare', group, usageKey, modelsKey] as const,

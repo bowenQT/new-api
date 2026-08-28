@@ -20,16 +20,21 @@ import type { TFunction } from 'i18next'
 import { z } from 'zod'
 
 import {
-  ADAPTER_OPTIONS,
   DEFAULT_SCHEDULE_INTERVAL_SECONDS,
   MIN_SCHEDULE_INTERVAL_SECONDS,
-  findAdapterOption,
+  PRICE_ROLE_SUPPLIER_COST,
 } from '../constants'
-import type { PriceSourceRequest, PriceSourceView } from '../types'
+import type {
+  PriceAdapterView,
+  PriceSourceRequest,
+  PriceSourceView,
+} from '../types'
 
 export interface PriceSourceFormValues {
   name: string
   adapter_key: string
+  role: string
+  scope: string
   channel_id: string
   enabled: boolean
   schedule_enabled: boolean
@@ -37,9 +42,16 @@ export interface PriceSourceFormValues {
   settings: string
 }
 
+/**
+ * Defaults for a source whose adapter has not been chosen yet. The adapter
+ * catalog is fetched, so `adapter_key`, `role` and `scope` stay empty until the
+ * response arrives rather than guessing an adapter that may not be registered.
+ */
 export const PRICE_SOURCE_FORM_DEFAULTS: PriceSourceFormValues = {
   name: '',
-  adapter_key: ADAPTER_OPTIONS[0].key,
+  adapter_key: '',
+  role: '',
+  scope: '',
   channel_id: '',
   enabled: true,
   schedule_enabled: false,
@@ -48,11 +60,36 @@ export const PRICE_SOURCE_FORM_DEFAULTS: PriceSourceFormValues = {
 }
 
 /**
+ * Whether a source carries a channel id. `ValidatePriceSourceForWrite` requires
+ * one for `supplier_cost` and refuses one for every other role, so the selected
+ * role decides even for an adapter that admits several roles. The adapter's
+ * `requires_channel` says the same thing whenever it admits only one role.
+ */
+export function priceSourceUsesChannel(
+  role: string,
+  adapter?: PriceAdapterView
+): boolean {
+  return role === PRICE_ROLE_SUPPLIER_COST || adapter?.requires_channel === true
+}
+
+export function findPriceAdapter(
+  adapters: PriceAdapterView[],
+  key: string
+): PriceAdapterView | undefined {
+  return adapters.find((adapter) => adapter.key === key)
+}
+
+/**
  * Client-side mirror of `upstreamprice.ValidatePriceSourceForWrite`. The
  * server stays authoritative; this only stops the admin from submitting a
- * combination that is already known to be refused (spec §7.1, §8.4).
+ * combination that is already known to be refused (spec §7.1, §8.4). The
+ * admissible combinations come from the adapter endpoint, so an adapter the
+ * server does not register can never validate here either.
  */
-export function getPriceSourceFormSchema(t: TFunction) {
+export function getPriceSourceFormSchema(
+  t: TFunction,
+  adapters: PriceAdapterView[]
+) {
   return z
     .object({
       name: z
@@ -61,6 +98,8 @@ export function getPriceSourceFormSchema(t: TFunction) {
         .min(1, t('Source name is required'))
         .max(128, t('Source name must be at most 128 characters')),
       adapter_key: z.string().min(1, t('Adapter is required')),
+      role: z.string().min(1, t('Role is required')),
+      scope: z.string().min(1, t('Scope is required')),
       channel_id: z.string(),
       enabled: z.boolean(),
       schedule_enabled: z.boolean(),
@@ -68,7 +107,7 @@ export function getPriceSourceFormSchema(t: TFunction) {
       settings: z.string(),
     })
     .superRefine((values, ctx) => {
-      const adapter = findAdapterOption(values.adapter_key)
+      const adapter = findPriceAdapter(adapters, values.adapter_key)
       if (!adapter) {
         ctx.addIssue({
           code: 'custom',
@@ -78,7 +117,22 @@ export function getPriceSourceFormSchema(t: TFunction) {
         return
       }
 
-      if (adapter.requiresChannel) {
+      if (!adapter.allowed_roles.includes(values.role)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['role'],
+          message: t('This adapter does not allow the selected role'),
+        })
+      }
+      if (!adapter.allowed_scopes.includes(values.scope)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['scope'],
+          message: t('This adapter does not allow the selected scope'),
+        })
+      }
+
+      if (priceSourceUsesChannel(values.role, adapter)) {
         const channelId = Number.parseInt(values.channel_id, 10)
         if (!Number.isInteger(channelId) || channelId <= 0) {
           ctx.addIssue({
@@ -139,6 +193,8 @@ export function priceSourceToFormValues(
   return {
     name: source.name,
     adapter_key: source.adapter_key,
+    role: source.role,
+    scope: source.scope,
     channel_id: source.channel_id == null ? '' : String(source.channel_id),
     enabled: source.enabled,
     schedule_enabled: source.schedule_enabled,
@@ -148,22 +204,21 @@ export function priceSourceToFormValues(
 }
 
 /**
- * Role and scope are not free-form: each registered adapter admits exactly one
- * pair, so they are derived from the adapter rather than offered as inputs
- * that the server would reject.
+ * A role that does not use a channel must send `null`, not the id left over in
+ * the form, because the server refuses a channel on any non-supplier role.
  */
 export function formValuesToPriceSourcePayload(
-  values: PriceSourceFormValues
+  values: PriceSourceFormValues,
+  adapter?: PriceAdapterView
 ): PriceSourceRequest {
-  const adapter = findAdapterOption(values.adapter_key)
   const channelId = Number.parseInt(values.channel_id, 10)
-  const usesChannel = adapter?.requiresChannel === true
+  const usesChannel = priceSourceUsesChannel(values.role, adapter)
 
   return {
     name: values.name.trim(),
     adapter_key: values.adapter_key,
-    role: adapter?.role ?? '',
-    scope: adapter?.scope ?? '',
+    role: values.role,
+    scope: values.scope,
     channel_id: usesChannel && Number.isInteger(channelId) ? channelId : null,
     enabled: values.enabled,
     schedule_enabled: values.schedule_enabled,
