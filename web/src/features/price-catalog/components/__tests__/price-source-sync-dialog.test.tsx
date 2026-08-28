@@ -22,7 +22,11 @@ import { afterEach, describe, expect, test } from 'vitest'
 
 import { api } from '@/lib/api'
 
-import type { PricePreviewResponse, PriceSourceView } from '../../types'
+import type {
+  PricePreviewResponse,
+  PriceSourceView,
+  PriceSyncResponse,
+} from '../../types'
 import { PriceSourceSyncDialog } from '../price-source-sync-dialog'
 
 type ApiMethod = (url: string, data?: unknown) => Promise<{ data: unknown }>
@@ -60,7 +64,7 @@ const source: PriceSourceView = {
 const preview: PricePreviewResponse = {
   source_id: 42,
   base_run_id: null,
-  projected_run_status: 'success',
+  projected_run_status: 'succeeded',
   discovered_count: 2,
   valid_count: 2,
   unsupported_count: 0,
@@ -84,6 +88,18 @@ const preview: PricePreviewResponse = {
   expires_at: 1_700_000_600,
 }
 
+const committedRun: PriceSyncResponse = {
+  run_id: 9,
+  status: 'succeeded',
+  discovered_count: 2,
+  valid_count: 2,
+  unsupported_count: 0,
+  rejected_count: 0,
+  missing_count: 0,
+  new_snapshot_count: 1,
+  idempotent_hit_count: 1,
+}
+
 function renderDialog(onSynced: () => void = () => undefined) {
   queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -98,6 +114,18 @@ function renderDialog(onSynced: () => void = () => undefined) {
       />
     </QueryClientProvider>
   )
+}
+
+/** Runs the preview, then the commit the preview token unlocks. */
+async function commitPreviewedSync() {
+  fireEvent.click(screen.getByRole('button', { name: 'Run preview' }))
+  await waitFor(() =>
+    expect(
+      screen.getByRole('button', { name: 'Confirm and sync' })
+    ).toBeEnabled()
+  )
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm and sync' }))
+  await screen.findByText('Run #9')
 }
 
 afterEach(() => {
@@ -134,7 +162,7 @@ describe('price source sync dialog', () => {
           success: true,
           data: {
             run_id: 9,
-            status: 'success',
+            status: 'succeeded',
             discovered_count: 2,
             valid_count: 2,
             unsupported_count: 0,
@@ -212,6 +240,106 @@ describe('price source sync dialog', () => {
     expect(
       await screen.findByText('The preview returned no model rows.')
     ).toBeInTheDocument()
+  })
+
+  // A refused or partial commit still comes back inside a success envelope, so
+  // the dialog has to read the run status rather than the envelope.
+  test('reports a gate-refused commit as a failure that wrote nothing', async () => {
+    apiClient.post = async (url) => {
+      if (url.endsWith('/preview')) {
+        return { data: { success: true, data: preview } }
+      }
+      return {
+        data: {
+          success: true,
+          data: {
+            ...committedRun,
+            status: 'failed',
+            valid_count: 1,
+            new_snapshot_count: 0,
+            error_summary:
+              'coverage drop gate refused commit: valid 1 vs baseline 40',
+          },
+        },
+      }
+    }
+
+    renderDialog()
+    await commitPreviewedSync()
+
+    expect(
+      await screen.findByText('The sync run failed and nothing was written')
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        'Model coverage fell further than the configured gate allows, so the server refused this commit. The previous prices are kept.'
+      )
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        'coverage drop gate refused commit: valid 1 vs baseline 40'
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByText('Failed')).toBeInTheDocument()
+  })
+
+  test('reports a commit with no valid observation as a failure', async () => {
+    apiClient.post = async (url) => {
+      if (url.endsWith('/preview')) {
+        return { data: { success: true, data: preview } }
+      }
+      return {
+        data: {
+          success: true,
+          data: {
+            ...committedRun,
+            status: 'failed',
+            valid_count: 0,
+            new_snapshot_count: 0,
+            error_summary: 'no valid observations',
+          },
+        },
+      }
+    }
+
+    renderDialog()
+    await commitPreviewedSync()
+
+    expect(
+      await screen.findByText(
+        'The fetch returned no valid observation, so no snapshot was committed. The previous prices are kept.'
+      )
+    ).toBeInTheDocument()
+  })
+
+  test('warns that a partial commit left some models out', async () => {
+    apiClient.post = async (url) => {
+      if (url.endsWith('/preview')) {
+        return { data: { success: true, data: preview } }
+      }
+      return {
+        data: {
+          success: true,
+          data: { ...committedRun, status: 'partial', rejected_count: 1 },
+        },
+      }
+    }
+
+    renderDialog()
+    await commitPreviewedSync()
+
+    expect(
+      await screen.findByText('Some models were left out')
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        'The valid observations were committed. Unsupported, rejected, and missing models were not, and their previous snapshots are kept.'
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByText('Partially committed')).toBeInTheDocument()
+    expect(
+      screen.queryByText('The sync run failed and nothing was written')
+    ).toBeNull()
   })
 
   test('keeps the commit unavailable when the preview failed', async () => {

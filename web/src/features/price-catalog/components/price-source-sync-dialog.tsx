@@ -45,7 +45,11 @@ import {
 import { formatTimestampToDate } from '@/lib/format'
 
 import { previewPriceSource, syncPriceSource } from '../api'
-import { CHANGE_LABEL_KEYS, ENTRY_STATUS_LABEL_KEYS } from '../constants'
+import {
+  CHANGE_LABEL_KEYS,
+  ENTRY_STATUS_LABEL_KEYS,
+  RUN_STATUS_LABEL_KEYS,
+} from '../constants'
 import type {
   PricePreviewResponse,
   PriceSourceView,
@@ -54,6 +58,16 @@ import type {
 
 /** Preview rows shown inline; the full diff can be large. */
 const PREVIEW_ITEM_LIMIT = 200
+
+/** Badge tone per committed run status; an unknown status stays neutral. */
+const RUN_STATUS_BADGE_VARIANTS: Record<
+  string,
+  'destructive' | 'warning' | 'secondary'
+> = {
+  failed: 'destructive',
+  partial: 'warning',
+  succeeded: 'secondary',
+}
 
 type Props = {
   open: boolean
@@ -114,7 +128,19 @@ export function PriceSourceSyncDialog(props: Props) {
       setSyncResult(data)
       // The token is single use: force a fresh preview before another commit.
       setPreview(null)
+      // The run is recorded either way, so the source list is refreshed even
+      // when the gate refused the commit.
       props.onSynced()
+      // A refused commit comes back inside a success envelope (spec §8.1), so
+      // the run status decides how it is reported.
+      if (data.status === 'failed') {
+        toast.error(t('The sync run failed and nothing was written'))
+        return
+      }
+      if (data.status === 'partial') {
+        toast.warning(t('Sync committed, but some models were left out'))
+        return
+      }
       toast.success(t('Sync committed'))
     },
     onError: (error: unknown) => {
@@ -179,14 +205,43 @@ export function PriceSourceSyncDialog(props: Props) {
                 <Badge variant='outline'>
                   {t('Run #{{id}}', { id: syncResult.run_id })}
                 </Badge>
-                <Badge
-                  variant={
-                    syncResult.status === 'failed' ? 'destructive' : 'secondary'
-                  }
-                >
-                  {syncResult.status}
+                <Badge variant={RUN_STATUS_BADGE_VARIANTS[syncResult.status]}>
+                  {t(
+                    RUN_STATUS_LABEL_KEYS[syncResult.status] ??
+                      syncResult.status
+                  )}
                 </Badge>
               </div>
+
+              {syncResult.status === 'failed' && (
+                <Alert variant='destructive'>
+                  <TriangleAlert aria-hidden='true' />
+                  <AlertTitle>
+                    {t('The sync run failed and nothing was written')}
+                  </AlertTitle>
+                  <AlertDescription>
+                    {syncResult.valid_count === 0
+                      ? t(
+                          'The fetch returned no valid observation, so no snapshot was committed. The previous prices are kept.'
+                        )
+                      : t(
+                          'Model coverage fell further than the configured gate allows, so the server refused this commit. The previous prices are kept.'
+                        )}
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {syncResult.status === 'partial' && (
+                <Alert>
+                  <TriangleAlert aria-hidden='true' />
+                  <AlertTitle>{t('Some models were left out')}</AlertTitle>
+                  <AlertDescription>
+                    {t(
+                      'The valid observations were committed. Unsupported, rejected, and missing models were not, and their previous snapshots are kept.'
+                    )}
+                  </AlertDescription>
+                </Alert>
+              )}
               <div className='grid grid-cols-2 gap-2 sm:grid-cols-4'>
                 <SummaryStat
                   label={t('Discovered')}

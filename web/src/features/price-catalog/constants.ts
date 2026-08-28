@@ -95,6 +95,18 @@ export const ENTRY_STATUS_LABEL_KEYS: Record<string, string> = {
   rejected: 'Rejected',
 }
 
+/**
+ * Committed run status codes (`model.PriceSyncRunStatus*`). A commit that the
+ * coverage gate refused, or that found no valid observation, still returns a
+ * success envelope carrying `failed`, so the UI must read this field rather
+ * than the envelope.
+ */
+export const RUN_STATUS_LABEL_KEYS: Record<string, string> = {
+  succeeded: 'Succeeded',
+  partial: 'Partially committed',
+  failed: 'Failed',
+}
+
 /** Preview diff change codes. */
 export const CHANGE_LABEL_KEYS: Record<string, string> = {
   new: 'New',
