@@ -71,6 +71,7 @@ run_in_repo() {
 init_fixture() {
   local repo_path=$1
   mkdir -p "$repo_path/scripts/agent-runtime"
+  mkdir -p "$repo_path/pkg/billingexpr"
   cp "$source_root/scripts/agent-runtime/bootstrap.sh" "$repo_path/scripts/agent-runtime/"
   cp "$source_root/scripts/agent-runtime/preflight.sh" "$repo_path/scripts/agent-runtime/"
   cp "$source_root/scripts/agent-runtime/upstream-audit.sh" "$repo_path/scripts/agent-runtime/"
@@ -80,7 +81,8 @@ init_fixture() {
   git -C "$repo_path" config user.email runtime-test@example.invalid
   printf '.env\n' > "$repo_path/.gitignore"
   printf 'fixture\n' > "$repo_path/README.md"
-  git -C "$repo_path" add .gitignore README.md scripts/agent-runtime
+  printf 'fixture\n' > "$repo_path/pkg/billingexpr/rename-source.go"
+  git -C "$repo_path" add .gitignore README.md scripts/agent-runtime pkg/billingexpr/rename-source.go
   git -C "$repo_path" commit --quiet -m fixture
   git -C "$repo_path" branch -M main
   git -C "$repo_path" remote add origin https://github.com/bowenQT/new-api.git
@@ -139,19 +141,42 @@ if [[ "$(git -C "$fixture_repo" config --local --get branch.main.remote)" != "or
   exit 1
 fi
 git -C "$fixture_repo" config --local branch.main.merge refs/heads/downstream/main
-expect_failure "branch.main.merge expected 'refs/heads/main'" \
+expect_failure "branch.main.merge expected exactly one value 'refs/heads/main'" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --apply >/dev/null
+git -C "$fixture_repo" config --local --unset-all branch.main.merge
+git -C "$fixture_repo" config --local --add branch.main.merge refs/heads/downstream/main
+git -C "$fixture_repo" config --local --add branch.main.merge refs/heads/main
+expect_failure "branch.main.merge expected exactly one value 'refs/heads/main'" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset-all branch.main.merge
 run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --apply >/dev/null
 
 git -C "$fixture_repo" config --local extensions.worktreeConfig true
 git -C "$fixture_repo" config --worktree push.default current
-expect_failure "effective push.default expected 'simple'" \
+expect_failure "effective push.default expected exactly one value 'simple'" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --apply
 git -C "$fixture_repo" config --worktree --unset push.default
 git -C "$fixture_repo" config --worktree branch.main.merge refs/heads/downstream/main
-expect_failure "effective branch.main.merge expected 'refs/heads/main'" \
+expect_failure "effective branch.main.merge expected exactly one value 'refs/heads/main'" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
 git -C "$fixture_repo" config --worktree --unset branch.main.merge
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check >/dev/null
+
+linked_worktree="$fixture_root/valid-linked"
+git -C "$fixture_repo" worktree add --quiet -b feature/linked "$linked_worktree" downstream/main
+git -C "$linked_worktree" config --worktree remote.origin.url https://evil.example/bowenQT/new-api.git
+expect_failure "unexpected effective origin fetch URL in worktree" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$linked_worktree" config --worktree --unset remote.origin.url
+git -C "$linked_worktree" config --worktree push.default current
+expect_failure "effective push.default expected exactly one value 'simple'" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$linked_worktree" config --worktree --unset push.default
+git -C "$linked_worktree" config --worktree branch.main.merge refs/heads/downstream/main
+expect_failure "effective branch.main.merge expected exactly one value 'refs/heads/main'" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$linked_worktree" config --worktree --unset branch.main.merge
 run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check >/dev/null
 
 git -C "$fixture_repo" switch --quiet downstream/main
@@ -181,6 +206,10 @@ expect_failure "suspicious uncommitted credential/data artifact: source key.pem"
 git -C "$fixture_repo" mv -- safe-renamed.txt 'source key.pem'
 run_in_repo "$fixture_repo" scripts/agent-runtime/preflight.sh --mode edit >/dev/null
 
+mkdir -p "$fixture_repo/docs"
+git -C "$fixture_repo" mv -- pkg/billingexpr/rename-source.go docs/renamed.md
+git -C "$fixture_repo" commit --quiet -m rename-high-risk-path
+
 mkdir -p \
   "$fixture_repo/pkg/billingexpr" \
   "$fixture_repo/oauth" \
@@ -206,6 +235,7 @@ audit_output="$fixture_root/upstream-audit-output"
 run_in_repo "$fixture_repo" scripts/agent-runtime/upstream-audit.sh --no-fetch --target HEAD > "$audit_output"
 semantic_paths=$(awk '/^semantic_review_paths:$/ { capture = 1; next } capture { print }' "$audit_output")
 for high_risk_path in \
+  pkg/billingexpr/rename-source.go \
   pkg/billingexpr/runtime-review.go \
   oauth/runtime-review.go \
   i18n/runtime-review.go \

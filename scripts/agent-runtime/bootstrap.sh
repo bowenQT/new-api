@@ -34,6 +34,25 @@ repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || {
 }
 cd "$repo_root"
 
+worktree_paths=()
+while IFS= read -r -d '' worktree_record; do
+  case "$worktree_record" in
+    'worktree '*)
+      worktree_paths+=("${worktree_record#worktree }")
+      ;;
+  esac
+done < <(git worktree list --porcelain -z)
+if (( ${#worktree_paths[@]} == 0 )); then
+  echo "ERROR: repository has no registered worktrees" >&2
+  exit 1
+fi
+for worktree_path in "${worktree_paths[@]}"; do
+  if [[ ! -d "$worktree_path" ]]; then
+    echo "ERROR: registered worktree is unavailable: $worktree_path" >&2
+    exit 1
+  fi
+done
+
 git remote get-url origin >/dev/null 2>&1 || {
   echo "ERROR: missing origin remote" >&2
   exit 1
@@ -89,9 +108,10 @@ else
 fi
 
 validate_effective_urls() {
-  local remote_name=$1
-  local repository=$2
-  local url_mode=$3
+  local worktree_path=$1
+  local remote_name=$2
+  local repository=$3
+  local url_mode=$4
   local effective_url
   local found=false
   local git_args=(remote get-url --all "$remote_name")
@@ -102,19 +122,21 @@ validate_effective_urls() {
     [[ -n "$effective_url" ]] || continue
     found=true
     if ! matches_github_repo "$effective_url" "$repository"; then
-      echo "ERROR: unexpected effective $remote_name $url_mode URL: $effective_url" >&2
+      echo "ERROR: unexpected effective $remote_name $url_mode URL in worktree $worktree_path: $effective_url" >&2
       return 1
     fi
-  done < <(git "${git_args[@]}")
+  done < <(git -C "$worktree_path" "${git_args[@]}")
   if ! "$found"; then
-    echo "ERROR: missing effective $remote_name $url_mode URL" >&2
+    echo "ERROR: missing effective $remote_name $url_mode URL in worktree $worktree_path" >&2
     return 1
   fi
 }
 
-validate_effective_urls origin bowenQT/new-api fetch
-validate_effective_urls origin bowenQT/new-api push
-validate_effective_urls upstream QuantumNous/new-api fetch
+for worktree_path in "${worktree_paths[@]}"; do
+  validate_effective_urls "$worktree_path" origin bowenQT/new-api fetch
+  validate_effective_urls "$worktree_path" origin bowenQT/new-api push
+  validate_effective_urls "$worktree_path" upstream QuantumNous/new-api fetch
+done
 
 origin_url=$(git remote get-url origin)
 upstream_url=$(git remote get-url upstream)
@@ -138,25 +160,25 @@ for operation_path in "${operation_paths[@]}"; do
 done
 
 if [[ "$mode" == "apply" ]]; then
-  git config --local remote.upstream.pushurl DISABLED
-  git config --local remote.pushDefault origin
-  git config --local push.default simple
-  git config --local pull.ff only
-  git config --local fetch.prune false
-  git config --local rebase.autoStash false
-  git config --local merge.autoStash false
-  git config --local merge.conflictStyle zdiff3
-  git config --local rerere.enabled true
-  git config --local rerere.autoupdate false
+  git config --local --replace-all remote.upstream.pushurl DISABLED
+  git config --local --replace-all remote.pushDefault origin
+  git config --local --replace-all push.default simple
+  git config --local --replace-all pull.ff only
+  git config --local --replace-all fetch.prune false
+  git config --local --replace-all rebase.autoStash false
+  git config --local --replace-all merge.autoStash false
+  git config --local --replace-all merge.conflictStyle zdiff3
+  git config --local --replace-all rerere.enabled true
+  git config --local --replace-all rerere.autoupdate false
 
   if git show-ref --verify --quiet refs/heads/main; then
-    git config --local branch.main.remote origin
-    git config --local branch.main.merge refs/heads/main
+    git config --local --replace-all branch.main.remote origin
+    git config --local --replace-all branch.main.merge refs/heads/main
   fi
   if git show-ref --verify --quiet refs/heads/downstream/main &&
     git show-ref --verify --quiet refs/remotes/origin/downstream/main; then
-    git config --local branch.downstream/main.remote origin
-    git config --local branch.downstream/main.merge refs/heads/downstream/main
+    git config --local --replace-all branch.downstream/main.remote origin
+    git config --local --replace-all branch.downstream/main.merge refs/heads/downstream/main
   fi
 fi
 
@@ -164,24 +186,29 @@ check_local_config() {
   local key=$1
   local expected=$2
   local actual
-  actual=$(git config --local --get "$key" 2>/dev/null || true)
-  if [[ "$actual" != "$expected" ]]; then
-    echo "ERROR: $key expected '$expected', found '${actual:-<unset>}'" >&2
+  local count
+  actual=$(git config --local --get-all "$key" 2>/dev/null || true)
+  count=$({ git config --local --get-all "$key" 2>/dev/null || true; } | awk 'END { print NR + 0 }')
+  if [[ "$count" != "1" || "$actual" != "$expected" ]]; then
+    echo "ERROR: $key expected exactly one value '$expected', found $count: '${actual:-<unset>}'" >&2
     return 1
   fi
   printf '%s=%s\n' "$key" "$actual"
 }
 
 check_effective_config() {
-  local key=$1
-  local expected=$2
+  local worktree_path=$1
+  local key=$2
+  local expected=$3
   local actual
-  actual=$(git config --get "$key" 2>/dev/null || true)
-  if [[ "$actual" != "$expected" ]]; then
-    echo "ERROR: effective $key expected '$expected', found '${actual:-<unset>}'" >&2
+  local count
+  actual=$(git -C "$worktree_path" config --get-all "$key" 2>/dev/null || true)
+  count=$({ git -C "$worktree_path" config --get-all "$key" 2>/dev/null || true; } | awk 'END { print NR + 0 }')
+  if [[ "$count" != "1" || "$actual" != "$expected" ]]; then
+    echo "ERROR: worktree $worktree_path effective $key expected exactly one value '$expected', found $count: '${actual:-<unset>}'" >&2
     return 1
   fi
-  printf 'effective.%s=%s\n' "$key" "$actual"
+  printf 'worktree.%s.effective.%s=%s\n' "$worktree_path" "$key" "$actual"
 }
 
 required_configs=(
@@ -199,7 +226,9 @@ required_configs=(
 for required_config in "${required_configs[@]}"; do
   read -r key expected <<< "$required_config"
   check_local_config "$key" "$expected"
-  check_effective_config "$key" "$expected"
+  for worktree_path in "${worktree_paths[@]}"; do
+    check_effective_config "$worktree_path" "$key" "$expected"
+  done
 done
 
 effective_upstream_push=$(git remote get-url --push --all upstream 2>/dev/null || true)
@@ -210,17 +239,21 @@ fi
 
 if git show-ref --verify --quiet refs/heads/main; then
   check_local_config branch.main.remote origin
-  check_effective_config branch.main.remote origin
   check_local_config branch.main.merge refs/heads/main
-  check_effective_config branch.main.merge refs/heads/main
+  for worktree_path in "${worktree_paths[@]}"; do
+    check_effective_config "$worktree_path" branch.main.remote origin
+    check_effective_config "$worktree_path" branch.main.merge refs/heads/main
+  done
 fi
 
 if git show-ref --verify --quiet refs/heads/downstream/main &&
   git show-ref --verify --quiet refs/remotes/origin/downstream/main; then
   check_local_config branch.downstream/main.remote origin
-  check_effective_config branch.downstream/main.remote origin
   check_local_config branch.downstream/main.merge refs/heads/downstream/main
-  check_effective_config branch.downstream/main.merge refs/heads/downstream/main
+  for worktree_path in "${worktree_paths[@]}"; do
+    check_effective_config "$worktree_path" branch.downstream/main.remote origin
+    check_effective_config "$worktree_path" branch.downstream/main.merge refs/heads/downstream/main
+  done
 fi
 
 printf 'repository=%s\n' "$repo_root"

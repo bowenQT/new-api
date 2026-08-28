@@ -111,8 +111,8 @@ upstream_paths="$tmp_dir/upstream-paths"
 overlap_paths="$tmp_dir/overlap-paths"
 risk_paths="$tmp_dir/risk-paths"
 merge_output="$tmp_dir/merge-output"
-git diff --name-only "$merge_base..$target_sha" | LC_ALL=C sort -u > "$local_paths"
-git diff --name-only "$merge_base..$upstream_sha" | LC_ALL=C sort -u > "$upstream_paths"
+git diff --no-renames --name-only "$merge_base..$target_sha" | LC_ALL=C sort -u > "$local_paths"
+git diff --no-renames --name-only "$merge_base..$upstream_sha" | LC_ALL=C sort -u > "$upstream_paths"
 comm -12 "$local_paths" "$upstream_paths" > "$overlap_paths"
 
 cat "$local_paths" "$upstream_paths" | LC_ALL=C sort -u |
