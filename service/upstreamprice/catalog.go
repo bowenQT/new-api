@@ -63,6 +63,11 @@ func GetCurrentUpstreamPrices(sourceId *int) (*dto.UpstreamCurrentPriceResponse,
 		}
 		response.Entries = append(response.Entries, entries...)
 	}
+	alerts, err := EvaluateSourceAlerts(sources, now)
+	if err != nil {
+		return nil, err
+	}
+	response.Alerts = alerts
 	return response, nil
 }
 

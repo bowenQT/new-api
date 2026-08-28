@@ -196,6 +196,31 @@ func GetPriceSyncRunById(id int) (*PriceSyncRun, error) {
 	return run, nil
 }
 
+// GetRecentPriceSyncRuns returns a source's most recent runs, newest first.
+// Run id is the ordering authority (spec §7.3).
+func GetRecentPriceSyncRuns(sourceId int, limit int) ([]*PriceSyncRun, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	var runs []*PriceSyncRun
+	err := DB.Where("source_id = ?", sourceId).Order("id desc").Limit(limit).Find(&runs).Error
+	return runs, err
+}
+
+// GetRecentSuccessfulPriceSyncRuns returns a source's most recent runs that
+// advanced last_success_run_id (succeeded or partial), newest first.
+func GetRecentSuccessfulPriceSyncRuns(sourceId int, limit int) ([]*PriceSyncRun, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	var runs []*PriceSyncRun
+	err := DB.Where("source_id = ? AND status IN ?", sourceId, []string{PriceSyncRunStatusSucceeded, PriceSyncRunStatusPartial}).
+		Order("id desc").
+		Limit(limit).
+		Find(&runs).Error
+	return runs, err
+}
+
 func GetPriceSyncRunItems(runId int) ([]*PriceSyncRunItem, error) {
 	var items []*PriceSyncRunItem
 	err := DB.Where("run_id = ?", runId).Order("id asc").Find(&items).Error
