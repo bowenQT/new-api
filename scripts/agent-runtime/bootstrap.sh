@@ -78,8 +78,7 @@ matches_github_repo() {
   return 1
 }
 
-protected_config_regex='^(remote\.(origin|upstream)\.(url|pushurl)|remote\.origin\.push|remote\.pushdefault|url\..*\.(insteadof|pushinsteadof)|push\.default|pull\.ff|fetch\.prune|rebase\.autostash|merge\.autostash|merge\.conflictstyle|rerere\.enabled|rerere\.autoupdate|branch\.main\.(remote|merge)|branch\.downstream/main\.(remote|merge))$'
-conditioned_config_files=()
+protected_config_regex='^(remote\.(origin|upstream)\.(url|pushurl)|remote\.origin\.(fetch|push)|remote\.pushdefault|url\..*\.(insteadof|pushinsteadof)|push\.default|pull\.ff|fetch\.prune|rebase\.autostash|merge\.autostash|merge\.conflictstyle|rerere\.enabled|rerere\.autoupdate|branch\..*\.pushremote|branch\.main\.(remote|merge)|branch\.downstream/main\.(remote|merge))$'
 
 resolve_include_path() {
   local worktree_path=$1
@@ -130,32 +129,19 @@ resolve_include_path() {
 validate_conditioned_config_file() {
   local worktree_path=$1
   local config_path=$2
-  local seen_path
+  local baseline_values
   local protected_values
-  local origin
-  local config_entry
-  local include_path
-  local nested_path
-  for seen_path in "${conditioned_config_files[@]}"; do
-    if [[ "$seen_path" == "$config_path" ]]; then
-      return 0
-    fi
-  done
-  conditioned_config_files+=("$config_path")
   if [[ ! -f "$config_path" ]]; then
     echo "ERROR: branch-conditioned include is unavailable: $config_path" >&2
     return 1
   fi
-  protected_values=$(git config --file "$config_path" --get-regexp "$protected_config_regex" 2>/dev/null || true)
-  if [[ -n "$protected_values" ]]; then
+  baseline_values=$(git -C "$worktree_path" config --includes --get-regexp "$protected_config_regex" 2>/dev/null || true)
+  protected_values=$(git -C "$worktree_path" -c include.path="$config_path" \
+    config --includes --get-regexp "$protected_config_regex" 2>/dev/null || true)
+  if [[ "$protected_values" != "$baseline_values" ]]; then
     echo "ERROR: branch-conditioned safety override in $config_path: $protected_values" >&2
     return 1
   fi
-  while IFS= read -r -d '' origin && IFS= read -r -d '' config_entry; do
-    include_path=${config_entry#*$'\n'}
-    nested_path=$(resolve_include_path "$worktree_path" "$origin" "$include_path") || return 1
-    validate_conditioned_config_file "$worktree_path" "$nested_path" || return 1
-  done < <(git config --file "$config_path" --null --show-origin --get-regexp '^(include\.path|includeif\..*\.path)$' 2>/dev/null || true)
 }
 
 validate_branch_conditioned_config() {
@@ -250,6 +236,16 @@ validate_effective_unset() {
   fi
 }
 
+validate_effective_branch_push_remotes() {
+  local worktree_path=$1
+  local actual
+  actual=$(git -C "$worktree_path" config --get-regexp '^branch\..*\.pushremote$' 2>/dev/null || true)
+  if [[ -n "$actual" ]]; then
+    echo "ERROR: worktree $worktree_path effective branch pushRemote must be unset: $actual" >&2
+    return 1
+  fi
+}
+
 for worktree_path in "${worktree_paths[@]}"; do
   validate_branch_conditioned_config "$worktree_path"
   validate_effective_urls "$worktree_path" origin bowenQT/new-api fetch
@@ -280,6 +276,12 @@ done
 
 if [[ "$mode" == "apply" ]]; then
   git config --local --unset-all remote.origin.push 2>/dev/null || true
+  while IFS= read -r branch_push_key; do
+    [[ -n "$branch_push_key" ]] || continue
+    git config --local --unset-all "$branch_push_key"
+  done < <(git config --local --name-only --get-regexp '^branch\..*\.pushremote$' 2>/dev/null || true)
+  git config --local --replace-all remote.origin.fetch \
+    '+refs/heads/*:refs/remotes/origin/*'
   git config --local --replace-all remote.upstream.pushurl DISABLED
   git config --local --replace-all remote.pushDefault origin
   git config --local --replace-all push.default simple
@@ -305,6 +307,7 @@ fi
 for worktree_path in "${worktree_paths[@]}"; do
   validate_effective_upstream_push "$worktree_path"
   validate_effective_unset "$worktree_path" remote.origin.push
+  validate_effective_branch_push_remotes "$worktree_path"
 done
 
 check_local_config() {
@@ -350,6 +353,7 @@ check_effective_scalar_config() {
 }
 
 required_multi_configs=(
+  'remote.origin.fetch +refs/heads/*:refs/remotes/origin/*'
   'remote.upstream.pushurl DISABLED'
 )
 required_scalar_configs=(

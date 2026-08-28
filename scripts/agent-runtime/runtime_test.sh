@@ -156,6 +156,15 @@ git -C "$fixture_repo" config --local remote.origin.push \
 expect_failure "effective remote.origin.push must be unset" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
 run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --apply >/dev/null
+git -C "$fixture_repo" config --local branch.main.pushRemote evil
+expect_failure "effective branch pushRemote must be unset" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --apply >/dev/null
+git -C "$fixture_repo" config --local --replace-all remote.origin.fetch \
+  '+refs/heads/downstream/main:refs/remotes/origin/main'
+expect_failure "remote.origin.fetch expected exactly one value '+refs/heads/*:refs/remotes/origin/*'" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --apply >/dev/null
 
 git -C "$fixture_repo" config --local extensions.worktreeConfig true
 git -C "$fixture_repo" config --worktree push.default current
@@ -220,6 +229,34 @@ git config --file "$main_branch_config" remote.origin.push \
 git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$main_branch_config"
 expect_failure "branch-conditioned safety override" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+git config --file "$main_branch_config" --unset-all remote.origin.push
+git config --file "$main_branch_config" branch.main.pushRemote evil
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$main_branch_config"
+expect_failure "branch-conditioned safety override" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+git config --file "$main_branch_config" --unset-all branch.main.pushRemote
+git config --file "$main_branch_config" remote.origin.fetch \
+  '+refs/heads/downstream/main:refs/remotes/origin/main'
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$main_branch_config"
+expect_failure "branch-conditioned safety override" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+git config --file "$main_branch_config" --unset-all remote.origin.fetch
+nested_outer_config="$fixture_root/nested-outer-config"
+nested_inactive_config="$fixture_root/nested-inactive-config"
+git config --file "$nested_inactive_config" pull.ff false
+git config --file "$nested_outer_config" include.path "$nested_inactive_config"
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$nested_outer_config"
+expect_failure "branch-conditioned safety override" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+git config --file "$nested_outer_config" --unset-all include.path
+git config --file "$nested_outer_config" \
+  includeIf.gitdir:/definitely/not/this/repository/.path "$nested_inactive_config"
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$nested_outer_config"
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check >/dev/null
 git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
 tilde_home="$fixture_root/tilde-home"
 mkdir -p "$tilde_home"
