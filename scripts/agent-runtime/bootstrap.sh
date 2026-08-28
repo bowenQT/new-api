@@ -157,7 +157,7 @@ ensure_onbranch_overlap_binary() {
   if [[ -n "$onbranch_overlap_binary" ]]; then
     return 0
   fi
-  local helper_path="$repo_root/scripts/agent-runtime/onbranch_overlap.go"
+  local helper_path="$repo_root/scripts/agent-runtime/onbranch-overlap/main.go"
   if [[ ! -f "$helper_path" ]]; then
     echo "ERROR: missing onbranch overlap helper: $helper_path" >&2
     return 1

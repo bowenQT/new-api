@@ -77,7 +77,9 @@ init_fixture() {
   mkdir -p "$repo_path/scripts/agent-runtime"
   mkdir -p "$repo_path/pkg/billingexpr"
   cp "$source_root/scripts/agent-runtime/bootstrap.sh" "$repo_path/scripts/agent-runtime/"
-  cp "$source_root/scripts/agent-runtime/onbranch_overlap.go" "$repo_path/scripts/agent-runtime/"
+  mkdir -p "$repo_path/scripts/agent-runtime/onbranch-overlap"
+  cp "$source_root/scripts/agent-runtime/onbranch-overlap/main.go" \
+    "$repo_path/scripts/agent-runtime/onbranch-overlap/"
   cp "$source_root/scripts/agent-runtime/preflight.sh" "$repo_path/scripts/agent-runtime/"
   cp "$source_root/scripts/agent-runtime/upstream-audit.sh" "$repo_path/scripts/agent-runtime/"
   chmod +x "$repo_path/scripts/agent-runtime/"*.sh
