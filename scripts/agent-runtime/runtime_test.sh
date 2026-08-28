@@ -233,6 +233,14 @@ GIT_CONFIG_GLOBAL="$global_config" run_in_repo "$fixture_repo" \
   scripts/agent-runtime/bootstrap.sh --check >/dev/null
 
 git -C "$fixture_repo" switch --quiet downstream/main
+git -C "$fixture_repo" branch -D main >/dev/null
+git -C "$fixture_repo" config --local branch.main.remote upstream
+git -C "$fixture_repo" config --local branch.main.merge refs/heads/downstream/main
+expect_failure "branch.main.remote expected exactly one value 'origin'" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --apply >/dev/null
+git -C "$fixture_repo" branch main refs/remotes/origin/main
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check >/dev/null
 main_branch_config="$fixture_root/main-branch-config"
 git config --file "$main_branch_config" branch.main.remote upstream
 git config --file "$main_branch_config" branch.main.merge refs/heads/downstream/main
@@ -338,6 +346,25 @@ git -C "$fixture_repo" config --local includeIf.onbranch:main.path \
 expect_failure "branch-conditioned safety override" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
 git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+nested_onbranch_middle_config="$fixture_root/nested-onbranch-middle-config"
+git config --file "$nested_onbranch_inner_config" --unset-all branch.main.merge
+git config --file "$nested_onbranch_inner_config" pull.ff false
+git config --file "$nested_onbranch_middle_config" \
+  'includeIf.onbranch:release-dev*.path' "$nested_onbranch_inner_config"
+git config --file "$nested_onbranch_outer_config" --unset-all \
+  'includeIf.onbranch:**/main.path'
+git config --file "$nested_onbranch_outer_config" \
+  'includeIf.onbranch:release-prod*.path' "$nested_onbranch_middle_config"
+git -C "$fixture_repo" config --local 'includeIf.onbranch:release-*.path' \
+  "$nested_onbranch_outer_config"
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check >/dev/null
+git config --file "$nested_onbranch_middle_config" --unset-all \
+  'includeIf.onbranch:release-dev*.path'
+git config --file "$nested_onbranch_middle_config" \
+  'includeIf.onbranch:release-prod1.path' "$nested_onbranch_inner_config"
+expect_failure "branch-conditioned safety override" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset 'includeIf.onbranch:release-*.path'
 nested_outer_config="$fixture_root/nested-outer-config"
 nested_inactive_config="$fixture_root/nested-inactive-config"
 git config --file "$nested_inactive_config" pull.ff false
@@ -360,6 +387,34 @@ git config --file "$nested_outer_config" \
 git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$nested_outer_config"
 expect_failure "branch-conditioned safety override" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+malformed_include="$fixture_root/malformed-include"
+printf '%s\n' '[unterminated' > "$malformed_include"
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path \
+  "$malformed_include"
+expect_failure "cannot parse branch-conditioned include" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+prefix_root="$fixture_root/prefix-root"
+prefix_bin="$fixture_root/prefix-bin"
+mkdir -p "$prefix_root/libexec/git-core" "$prefix_bin"
+git config --file "$prefix_root/runtime-safe.conf" color.ui auto
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'if [[ "${1:-}" == "--exec-path" ]]; then' \
+  '  printf "%s/libexec/git-core\\n" "$RUNTIME_TEST_PREFIX"' \
+  '  exit 0' \
+  'fi' \
+  'exec "$RUNTIME_TEST_GIT" "$@"' \
+  > "$prefix_bin/git"
+chmod +x "$prefix_bin/git"
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path \
+  '%(prefix)/runtime-safe.conf'
+runtime_test_git=$(command -v git)
+PATH="$prefix_bin:$PATH" \
+  RUNTIME_TEST_PREFIX="$prefix_root" \
+  RUNTIME_TEST_GIT="$runtime_test_git" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check >/dev/null
 git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
 tilde_home="$fixture_root/tilde-home"
 mkdir -p "$tilde_home"

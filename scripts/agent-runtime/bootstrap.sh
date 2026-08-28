@@ -81,11 +81,13 @@ matches_github_repo() {
 protected_config_regex='^(remote\.(origin|upstream)\.(fetch|url|pushurl)|remote\.origin\.(mirror|push)|remote\.pushdefault|url\..*\.(insteadof|pushinsteadof)|push\.default|pull\.ff|fetch\.prune|rebase\.autostash|merge\.autostash|merge\.conflictstyle|rerere\.enabled|rerere\.autoupdate|branch\..*\.pushremote|branch\.main\.(remote|merge|mergeoptions)|branch\.downstream/main\.(remote|merge|mergeoptions))$'
 conditioned_config_files=()
 onbranch_match_root=''
+conditioned_scan_root=$(mktemp -d "${TMPDIR:-/tmp}/newapi-conditioned-scan.XXXXXX")
 
 cleanup_onbranch_match() {
   if [[ -n "$onbranch_match_root" ]]; then
     rm -rf -- "$onbranch_match_root"
   fi
+  rm -rf -- "$conditioned_scan_root"
 }
 trap cleanup_onbranch_match EXIT
 
@@ -119,6 +121,10 @@ resolve_include_path() {
   case "$include_path" in
     '%(home)/'*)
       printf '%s/%s\n' "${HOME}" "${include_path#%(home)/}"
+      ;;
+    '%(prefix)/'*)
+      expanded_include_path=$(dirname "$(dirname "$(env -u GIT_EXEC_PATH git --exec-path)")")
+      printf '%s/%s\n' "$expanded_include_path" "${include_path#%(prefix)/}"
       ;;
     '%('*)
       echo "ERROR: cannot safely resolve branch-conditioned include path: $include_path" >&2
@@ -212,6 +218,44 @@ onbranch_conditions_overlap() {
   return 0
 }
 
+onbranch_context_overlaps_pattern() {
+  local branch_context=$1
+  local nested_pattern=$2
+  local context_pattern
+  while IFS= read -r context_pattern; do
+    [[ -n "$context_pattern" ]] || continue
+    if ! onbranch_conditions_overlap "$context_pattern" "$nested_pattern"; then
+      return 1
+    fi
+  done <<< "$branch_context"
+  return 0
+}
+
+scan_conditioned_config() {
+  local config_path=$1
+  local show_origin=$2
+  local config_regex=$3
+  local output_file
+  local error_file
+  local command_exit
+  local git_args=(config --file "$config_path" --null)
+  output_file=$(mktemp "$conditioned_scan_root/config.XXXXXX")
+  error_file=$(mktemp "$conditioned_scan_root/error.XXXXXX")
+  if [[ "$show_origin" == "true" ]]; then
+    git_args+=(--show-origin)
+  fi
+  set +e
+  git "${git_args[@]}" --get-regexp "$config_regex" > "$output_file" 2> "$error_file"
+  command_exit=$?
+  set -e
+  if (( command_exit > 1 )); then
+    cat "$error_file" >&2
+    echo "ERROR: cannot parse branch-conditioned include: $config_path" >&2
+    return 1
+  fi
+  printf '%s\n' "$output_file"
+}
+
 conditioned_include_is_active() {
   local worktree_path=$1
   local parent_path=$2
@@ -262,6 +306,8 @@ validate_nested_conditioned_config() {
   local nested_path
   local nested_branch_pattern
   local nested_branch_context
+  local protected_scan_file
+  local include_scan_file
   for seen_path in "${conditioned_config_files[@]}"; do
     if [[ "$seen_path" == "$seen_key" ]]; then
       return 0
@@ -272,6 +318,8 @@ validate_nested_conditioned_config() {
     echo "ERROR: branch-conditioned include is unavailable: $config_path" >&2
     return 1
   fi
+  protected_scan_file=$(scan_conditioned_config \
+    "$config_path" false "$protected_config_regex") || return 1
   while IFS= read -r -d '' config_entry; do
     config_key=${config_entry%%$'\n'*}
     protected_value=${config_entry#*$'\n'}
@@ -280,8 +328,9 @@ validate_nested_conditioned_config() {
     fi
     echo "ERROR: branch-conditioned safety override in $config_path: $config_key $protected_value" >&2
     return 1
-  done < <(git config --file "$config_path" --null \
-    --get-regexp "$protected_config_regex" 2>/dev/null || true)
+  done < "$protected_scan_file"
+  include_scan_file=$(scan_conditioned_config \
+    "$config_path" true '^(include\.path|includeif\..*\.path)$') || return 1
   while IFS= read -r -d '' origin && IFS= read -r -d '' config_entry; do
     config_key=${config_entry%%$'\n'*}
     include_path=${config_entry#*$'\n'}
@@ -294,11 +343,8 @@ validate_nested_conditioned_config() {
       includeif.onbranch:*.path)
         nested_branch_pattern=${config_key#includeif.onbranch:}
         nested_branch_pattern=${nested_branch_pattern%.path}
-        if onbranch_conditions_overlap "$branch_context" "$nested_branch_pattern"; then
-          nested_branch_context=$branch_context
-          if onbranch_condition_is_exact "$nested_branch_pattern"; then
-            nested_branch_context=$nested_branch_pattern
-          fi
+        if onbranch_context_overlaps_pattern "$branch_context" "$nested_branch_pattern"; then
+          nested_branch_context="${branch_context}"$'\n'"${nested_branch_pattern}"
           validate_nested_conditioned_config \
             "$worktree_path" "$nested_path" "$nested_branch_context" || return 1
         fi
@@ -310,8 +356,7 @@ validate_nested_conditioned_config() {
         fi
         ;;
     esac
-  done < <(git config --file "$config_path" --null --show-origin \
-    --get-regexp '^(include\.path|includeif\..*\.path)$' 2>/dev/null || true)
+  done < "$include_scan_file"
 }
 
 validate_conditioned_config_file() {
@@ -489,10 +534,8 @@ if [[ "$mode" == "apply" ]]; then
   git config --local --replace-all rerere.enabled true
   git config --local --replace-all rerere.autoupdate false
 
-  if git show-ref --verify --quiet refs/heads/main; then
-    git config --local --replace-all branch.main.remote origin
-    git config --local --replace-all branch.main.merge refs/heads/main
-  fi
+  git config --local --replace-all branch.main.remote origin
+  git config --local --replace-all branch.main.merge refs/heads/main
   if git show-ref --verify --quiet refs/heads/downstream/main &&
     git show-ref --verify --quiet refs/remotes/origin/downstream/main; then
     git config --local --replace-all branch.downstream/main.remote origin
@@ -582,14 +625,12 @@ for required_config in "${required_scalar_configs[@]}"; do
   done
 done
 
-if git show-ref --verify --quiet refs/heads/main; then
-  check_local_config branch.main.remote origin
-  check_local_config branch.main.merge refs/heads/main
-  for worktree_path in "${worktree_paths[@]}"; do
-    check_effective_scalar_config "$worktree_path" branch.main.remote origin
-    check_effective_multi_config "$worktree_path" branch.main.merge refs/heads/main
-  done
-fi
+check_local_config branch.main.remote origin
+check_local_config branch.main.merge refs/heads/main
+for worktree_path in "${worktree_paths[@]}"; do
+  check_effective_scalar_config "$worktree_path" branch.main.remote origin
+  check_effective_multi_config "$worktree_path" branch.main.merge refs/heads/main
+done
 
 if git show-ref --verify --quiet refs/heads/downstream/main &&
   git show-ref --verify --quiet refs/remotes/origin/downstream/main; then
