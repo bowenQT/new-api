@@ -315,3 +315,39 @@ entries:
       - scripts/agent-runtime/verify.sh docs
     removal_condition: Retain the README.md notice while the fork is independently maintained; remove link-only deviations if the inherited documentation ships equivalent corrections.
     upstream_reference: null
+
+  - id: upstream-price-catalog-phase2
+    status: active
+    owner: downstream-maintainers
+    introduced_commit: 53c316bc182853892af75b693c9d4d9150e47aa7
+    purpose: Phase 2 of the upstream price catalog per docs/downstream/upstream-price-catalog-spec.md — billingexpr base-expression projection, the RootAuth cost/sale/margin comparison endpoint, scheduled catalog sync on the existing SystemTask runner (off by default), catalog health alerts, and the models.dev / basellm curated reference adapters. It reads sale-pricing configuration for the comparison projection and still writes none of it.
+    paths:
+      - pkg/billingexpr/compile.go
+      - pkg/billingexpr/project.go
+      - pkg/billingexpr/project_test.go
+      - model/system_task.go
+      - controller/system_task_handlers.go
+      - service/upstreamprice/alerts.go
+      - service/upstreamprice/alerts_test.go
+      - service/upstreamprice/compare.go
+      - service/upstreamprice/compare_test.go
+      - service/upstreamprice/schedule.go
+      - service/upstreamprice/schedule_test.go
+      - service/upstreamprice/adapters/curated_reference.go
+      - service/upstreamprice/adapters/curated_reference_test.go
+      - service/upstreamprice/adapters/scheduled_sync_test.go
+      - service/upstreamprice/adapters/testdata/curated_basellm_sample.json
+      - service/upstreamprice/adapters/testdata/curated_models_dev_sample.json
+    upstream_touchpoints:
+      - billing expression compiler in pkg/billingexpr (shared requestRuleFactor shape detection and cache invalidation)
+      - SystemTask type registry in model/system_task.go and scheduled handler registration in controller/system_task_handlers.go
+      - RootAuth API route group /api/upstream-prices in router/api-router.go
+      - sale-pricing read accessors in setting/ratio_setting and setting/billing_setting
+    conflict_risk: medium
+    verification:
+      - go build ./... and go vet ./...
+      - go test ./pkg/billingexpr/... ./service/upstreamprice/... ./model ./controller -count=1
+      - billingexpr regression asserting RunExpr results and request-rule traces are unchanged by a base-expression projection, in both evaluation orders
+      - scheduled sync end-to-end tests asserting byte-identical sale-pricing exports, orphan refusal, and default-off selection
+    removal_condition: Remove only if the upstream price catalog feature is retired or upstream ships an equivalent comparison, scheduling, and reference-adapter capability.
+    upstream_reference: null
