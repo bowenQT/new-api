@@ -128,6 +128,11 @@ export function getPriceSourceFormSchema(t: TFunction) {
     })
 }
 
+/**
+ * Projects a stored source onto the form. The stored interval is kept
+ * verbatim, including 0, so round-tripping a source through a switch toggle
+ * never silently invents a schedule it did not have.
+ */
 export function priceSourceToFormValues(
   source: PriceSourceView
 ): PriceSourceFormValues {
@@ -137,8 +142,7 @@ export function priceSourceToFormValues(
     channel_id: source.channel_id == null ? '' : String(source.channel_id),
     enabled: source.enabled,
     schedule_enabled: source.schedule_enabled,
-    schedule_interval_seconds:
-      source.schedule_interval_seconds || DEFAULT_SCHEDULE_INTERVAL_SECONDS,
+    schedule_interval_seconds: source.schedule_interval_seconds,
     settings: source.settings ?? '',
   }
 }

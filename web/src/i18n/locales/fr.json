@@ -5464,6 +5464,7 @@
     "We could not load groups.": "Impossible de charger les groupes.",
     "We could not load price sources.": "Impossible de charger les sources de prix.",
     "We could not load the price catalog.": "Impossible de charger le catalogue de prix.",
-    "Worst-case margin": "Marge dans le pire des cas"
+    "Worst-case margin": "Marge dans le pire des cas",
+    "Set an interval of at least {{hours}} hours in Edit before scheduling.": "Définissez un intervalle d'au moins {{hours}} heures dans Modifier avant de planifier."
   }
 }

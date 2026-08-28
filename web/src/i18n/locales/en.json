@@ -5464,6 +5464,7 @@
     "We could not load groups.": "We could not load groups.",
     "We could not load price sources.": "We could not load price sources.",
     "We could not load the price catalog.": "We could not load the price catalog.",
-    "Worst-case margin": "Worst-case margin"
+    "Worst-case margin": "Worst-case margin",
+    "Set an interval of at least {{hours}} hours in Edit before scheduling.": "Set an interval of at least {{hours}} hours in Edit before scheduling."
   }
 }

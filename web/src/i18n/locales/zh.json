@@ -5464,6 +5464,7 @@
     "We could not load groups.": "无法加载分组。",
     "We could not load price sources.": "无法加载价格来源。",
     "We could not load the price catalog.": "无法加载价格目录。",
-    "Worst-case margin": "最差毛利"
+    "Worst-case margin": "最差毛利",
+    "Set an interval of at least {{hours}} hours in Edit before scheduling.": "启用定时同步前，请先在「编辑」中把间隔设为至少 {{hours}} 小时。"
   }
 }

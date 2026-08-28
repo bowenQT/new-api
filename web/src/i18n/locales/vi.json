@@ -5464,6 +5464,7 @@
     "We could not load groups.": "Không thể tải danh sách nhóm.",
     "We could not load price sources.": "Không thể tải nguồn giá.",
     "We could not load the price catalog.": "Không thể tải danh mục giá.",
-    "Worst-case margin": "Biên lợi nhuận xấu nhất"
+    "Worst-case margin": "Biên lợi nhuận xấu nhất",
+    "Set an interval of at least {{hours}} hours in Edit before scheduling.": "Hãy đặt khoảng thời gian ít nhất {{hours}} giờ trong mục Sửa trước khi lập lịch."
   }
 }

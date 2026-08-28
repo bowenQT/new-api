@@ -39,7 +39,11 @@ import { formatTimestampToDate } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import { getCurrentPrices, listPriceSources, updatePriceSource } from '../api'
-import { findAdapterOption, priceCatalogQueryKeys } from '../constants'
+import {
+  MIN_SCHEDULE_INTERVAL_SECONDS,
+  findAdapterOption,
+  priceCatalogQueryKeys,
+} from '../constants'
 import {
   formValuesToPriceSourcePayload,
   priceSourceToFormValues,
@@ -378,7 +382,11 @@ export function PriceSourcesPanel() {
                             <Switch
                               checked={source.schedule_enabled}
                               disabled={
-                                source.orphaned || toggleMutation.isPending
+                                source.orphaned ||
+                                toggleMutation.isPending ||
+                                (!source.schedule_enabled &&
+                                  source.schedule_interval_seconds <
+                                    MIN_SCHEDULE_INTERVAL_SECONDS)
                               }
                               onCheckedChange={(checked) =>
                                 toggleMutation.mutate({
@@ -405,6 +413,20 @@ export function PriceSourcesPanel() {
                                 )}
                               </div>
                             )}
+                            {!source.orphaned &&
+                              !source.schedule_enabled &&
+                              source.schedule_interval_seconds <
+                                MIN_SCHEDULE_INTERVAL_SECONDS && (
+                                <div className='text-muted-foreground text-[11px]'>
+                                  {t(
+                                    'Set an interval of at least {{hours}} hours in Edit before scheduling.',
+                                    {
+                                      hours:
+                                        MIN_SCHEDULE_INTERVAL_SECONDS / 3600,
+                                    }
+                                  )}
+                                </div>
+                              )}
                           </div>
                         </TableCell>
                         <TableCell className='py-3 pr-4 align-top'>

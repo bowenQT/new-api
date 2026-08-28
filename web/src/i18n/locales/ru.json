@@ -5464,6 +5464,7 @@
     "We could not load groups.": "Не удалось загрузить группы.",
     "We could not load price sources.": "Не удалось загрузить источники цен.",
     "We could not load the price catalog.": "Не удалось загрузить каталог цен.",
-    "Worst-case margin": "Маржа в худшем случае"
+    "Worst-case margin": "Маржа в худшем случае",
+    "Set an interval of at least {{hours}} hours in Edit before scheduling.": "Перед включением расписания задайте интервал не менее {{hours}} ч в разделе «Изменить»."
   }
 }

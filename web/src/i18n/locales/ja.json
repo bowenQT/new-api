@@ -5464,6 +5464,7 @@
     "We could not load groups.": "グループを読み込めませんでした。",
     "We could not load price sources.": "価格ソースを読み込めませんでした。",
     "We could not load the price catalog.": "価格カタログを読み込めませんでした。",
-    "Worst-case margin": "最悪ケースの粗利"
+    "Worst-case margin": "最悪ケースの粗利",
+    "Set an interval of at least {{hours}} hours in Edit before scheduling.": "スケジュールを有効にする前に、「編集」で間隔を {{hours}} 時間以上に設定してください。"
   }
 }

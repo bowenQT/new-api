@@ -64,6 +64,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { createPriceSource, updatePriceSource } from '../api'
 import {
   ADAPTER_OPTIONS,
+  DEFAULT_SCHEDULE_INTERVAL_SECONDS,
   MIN_SCHEDULE_INTERVAL_SECONDS,
   ROLE_LABEL_KEYS,
   SCOPE_LABEL_KEYS,
@@ -320,7 +321,22 @@ export function PriceSourceMutateDrawer(props: Props) {
                     <FormControl>
                       <Switch
                         checked={field.value}
-                        onCheckedChange={field.onChange}
+                        onCheckedChange={(checked) => {
+                          field.onChange(checked)
+                          // A stored interval of 0 is legal only while
+                          // scheduling is off, so offer the default instead of
+                          // an immediately invalid form.
+                          if (
+                            checked &&
+                            form.getValues('schedule_interval_seconds') <
+                              MIN_SCHEDULE_INTERVAL_SECONDS
+                          ) {
+                            form.setValue(
+                              'schedule_interval_seconds',
+                              DEFAULT_SCHEDULE_INTERVAL_SECONDS
+                            )
+                          }
+                        }}
                       />
                     </FormControl>
                   </FormItem>
