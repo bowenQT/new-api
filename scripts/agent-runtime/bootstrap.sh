@@ -142,7 +142,7 @@ resolve_include_path() {
         *)
           printf '%s/%s\n' "$origin_dir" "$expanded_include_path"
           ;;
-    esac
+      esac
       ;;
   esac
 }
@@ -357,7 +357,7 @@ validate_nested_conditioned_config() {
           fi
         fi
         ;;
-      esac
+    esac
   done < "$include_scan_file"
   unset "conditioned_config_stack[$stack_index]"
   conditioned_config_files+=("$seen_key")
