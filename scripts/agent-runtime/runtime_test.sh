@@ -77,6 +77,7 @@ init_fixture() {
   mkdir -p "$repo_path/scripts/agent-runtime"
   mkdir -p "$repo_path/pkg/billingexpr"
   cp "$source_root/scripts/agent-runtime/bootstrap.sh" "$repo_path/scripts/agent-runtime/"
+  cp "$source_root/scripts/agent-runtime/onbranch_overlap.go" "$repo_path/scripts/agent-runtime/"
   cp "$source_root/scripts/agent-runtime/preflight.sh" "$repo_path/scripts/agent-runtime/"
   cp "$source_root/scripts/agent-runtime/upstream-audit.sh" "$repo_path/scripts/agent-runtime/"
   chmod +x "$repo_path/scripts/agent-runtime/"*.sh
@@ -172,6 +173,10 @@ git -C "$fixture_repo" config --local pull.twohead ours
 expect_failure "effective pull.twohead must be unset" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
 run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --apply >/dev/null
+git -C "$fixture_repo" config --local core.sshCommand 'ssh -o HostName=evil.example'
+expect_failure "effective core.sshCommand must be unset" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --apply >/dev/null
 git -C "$fixture_repo" config --local --replace-all remote.origin.fetch \
   '+refs/heads/downstream/main:refs/remotes/origin/main'
 expect_failure "remote.origin.fetch expected exactly one value '+refs/heads/*:refs/remotes/origin/*'" \
@@ -204,6 +209,11 @@ git -C "$fixture_repo" config --worktree pull.twohead ours
 expect_failure "effective pull.twohead must be unset" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
 git -C "$fixture_repo" config --worktree --unset pull.twohead
+git -C "$fixture_repo" config --worktree core.sshCommand \
+  'ssh -o HostName=evil.example'
+expect_failure "effective core.sshCommand must be unset" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --worktree --unset core.sshCommand
 git -C "$fixture_repo" config --worktree remote.origin.mirror true
 expect_failure "effective remote.origin.mirror must be unset" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
@@ -308,6 +318,13 @@ expect_failure "branch-conditioned safety override" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
 git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
 git config --file "$main_branch_config" --unset-all pull.twohead
+git config --file "$main_branch_config" core.sshCommand \
+  'ssh -o HostName=evil.example'
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$main_branch_config"
+expect_failure "branch-conditioned safety override" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+git config --file "$main_branch_config" --unset-all core.sshCommand
 git config --file "$main_branch_config" remote.origin.fetch \
   '+refs/heads/downstream/main:refs/remotes/origin/main'
 git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$main_branch_config"
@@ -410,6 +427,23 @@ git config --file "$nested_onbranch_middle_config" \
 expect_failure "branch-conditioned safety override" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
 git -C "$fixture_repo" config --local --unset 'includeIf.onbranch:[ab]*.path'
+git config --file "$nested_onbranch_middle_config" --unset-all \
+  'includeIf.onbranch:[b]*.path'
+git config --file "$nested_onbranch_outer_config" --unset-all \
+  'includeIf.onbranch:[bc]*.path'
+git config --file "$nested_onbranch_outer_config" \
+  'includeIf.onbranch:release-*-dev.path' "$nested_onbranch_inner_config"
+git -C "$fixture_repo" config --local \
+  'includeIf.onbranch:release-*-prod.path' "$nested_onbranch_outer_config"
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check >/dev/null
+git config --file "$nested_onbranch_outer_config" --unset-all \
+  'includeIf.onbranch:release-*-dev.path'
+git config --file "$nested_onbranch_outer_config" \
+  'includeIf.onbranch:release-*-prod.path' "$nested_onbranch_inner_config"
+expect_failure "branch-conditioned safety override" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset \
+  'includeIf.onbranch:release-*-prod.path'
 nested_outer_config="$fixture_root/nested-outer-config"
 nested_inactive_config="$fixture_root/nested-inactive-config"
 git config --file "$nested_inactive_config" pull.ff false
@@ -531,6 +565,9 @@ printf 'fixture\n' > "$fixture_repo/oauth/runtime-review.go"
 printf 'fixture\n' > "$fixture_repo/i18n/runtime-review.go"
 printf 'fixture\n' > "$fixture_repo/constant/runtime-review.go"
 printf 'fixture\n' > "$fixture_repo/web/src/routes/runtime-review.tsx"
+printf 'fixture\n' > "$fixture_repo/web/package.json"
+printf 'fixture\n' > "$fixture_repo/web/bun.lock"
+printf 'fixture\n' > "$fixture_repo/web/rsbuild.config.ts"
 printf 'fixture\n' > "$fixture_repo/docs/ordinary.md"
 git -C "$fixture_repo" add -- \
   pkg/billingexpr/runtime-review.go \
@@ -538,6 +575,9 @@ git -C "$fixture_repo" add -- \
   i18n/runtime-review.go \
   constant/runtime-review.go \
   web/src/routes/runtime-review.tsx \
+  web/package.json \
+  web/bun.lock \
+  web/rsbuild.config.ts \
   docs/ordinary.md
 git -C "$fixture_repo" commit --quiet -m high-risk-paths
 audit_output="$fixture_root/upstream-audit-output"
@@ -549,7 +589,10 @@ for high_risk_path in \
   oauth/runtime-review.go \
   i18n/runtime-review.go \
   constant/runtime-review.go \
-  web/src/routes/runtime-review.tsx; do
+  web/src/routes/runtime-review.tsx \
+  web/package.json \
+  web/bun.lock \
+  web/rsbuild.config.ts; do
   if ! grep -Fxq "$high_risk_path" <<< "$semantic_paths"; then
     echo "ERROR: semantic review omitted high-risk path: $high_risk_path" >&2
     exit 1

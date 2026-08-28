@@ -78,15 +78,12 @@ matches_github_repo() {
   return 1
 }
 
-protected_config_regex='^(remote\.(origin|upstream)\.(fetch|url|pushurl)|remote\.origin\.(mirror|push)|remote\.pushdefault|url\..*\.(insteadof|pushinsteadof)|push\.default|pull\.(ff|twohead)|fetch\.prune|rebase\.autostash|merge\.autostash|merge\.conflictstyle|rerere\.enabled|rerere\.autoupdate|branch\..*\.pushremote|branch\.main\.(remote|merge|mergeoptions)|branch\.downstream/main\.(remote|merge|mergeoptions))$'
+protected_config_regex='^(remote\.(origin|upstream)\.(fetch|url|pushurl)|remote\.origin\.(mirror|push)|remote\.pushdefault|url\..*\.(insteadof|pushinsteadof)|core\.sshcommand|push\.default|pull\.(ff|twohead)|fetch\.prune|rebase\.autostash|merge\.autostash|merge\.conflictstyle|rerere\.enabled|rerere\.autoupdate|branch\..*\.pushremote|branch\.main\.(remote|merge|mergeoptions)|branch\.downstream/main\.(remote|merge|mergeoptions))$'
 conditioned_config_files=()
-onbranch_match_root=''
+onbranch_overlap_binary=''
 conditioned_scan_root=$(mktemp -d "${TMPDIR:-/tmp}/newapi-conditioned-scan.XXXXXX")
 
 cleanup_onbranch_match() {
-  if [[ -n "$onbranch_match_root" ]]; then
-    rm -rf -- "$onbranch_match_root"
-  fi
   rm -rf -- "$conditioned_scan_root"
 }
 trap cleanup_onbranch_match EXIT
@@ -148,256 +145,56 @@ resolve_include_path() {
   esac
 }
 
-onbranch_condition_is_exact() {
-  local branch_pattern=$1
-  case "$branch_pattern" in
-    *'*'* | *'?'* | *'['* | */)
-      return 1
-      ;;
-  esac
-}
-
-onbranch_condition_matches_branch() {
-  local branch_pattern=$1
-  local branch_name=$2
-  if [[ -z "$onbranch_match_root" ]]; then
-    onbranch_match_root=$(mktemp -d "${TMPDIR:-/tmp}/newapi-onbranch-match.XXXXXX")
-    git init --bare --quiet "$onbranch_match_root/repo.git"
-    git config --file "$onbranch_match_root/matched.conf" agentRuntime.matched true
-  fi
-  git --git-dir="$onbranch_match_root/repo.git" symbolic-ref \
-    HEAD "refs/heads/$branch_name" >/dev/null 2>&1 || return 1
-  git --git-dir="$onbranch_match_root/repo.git" \
-    -c "includeIf.onbranch:$branch_pattern.path=$onbranch_match_root/matched.conf" \
-    config --includes --get agentRuntime.matched >/dev/null 2>&1
-}
-
-onbranch_condition_prefix() {
-  local branch_pattern=$1
-  local branch_prefix=''
-  local branch_character
-  local branch_index=0
-  if [[ "$branch_pattern" == */ ]]; then
-    branch_pattern="${branch_pattern}**"
-  fi
-  while (( branch_index < ${#branch_pattern} )); do
-    branch_character=${branch_pattern:$branch_index:1}
-    case "$branch_character" in
-      '*' | '?' | '[')
-        break
-        ;;
-    esac
-    branch_prefix+=$branch_character
-    ((branch_index += 1))
-  done
-  printf '%s\n' "$branch_prefix"
-}
-
-onbranch_conditions_overlap() {
-  local outer_pattern=$1
-  local nested_pattern=$2
-  local outer_prefix
-  local nested_prefix
-  if onbranch_condition_is_exact "$outer_pattern"; then
-    onbranch_condition_matches_branch "$nested_pattern" "$outer_pattern"
-    return
-  fi
-  if onbranch_condition_is_exact "$nested_pattern"; then
-    onbranch_condition_matches_branch "$outer_pattern" "$nested_pattern"
-    return
-  fi
-  outer_prefix=$(onbranch_condition_prefix "$outer_pattern" || true)
-  nested_prefix=$(onbranch_condition_prefix "$nested_pattern" || true)
-  if [[ -n "$outer_prefix" && -n "$nested_prefix" ]]; then
-    if [[ "$outer_prefix" == "$nested_prefix"* || \
-      "$nested_prefix" == "$outer_prefix"* ]]; then
-      return 0
-    fi
-    return 1
-  fi
-  return 0
-}
-
 onbranch_context_overlaps_pattern() {
   local branch_context=$1
   local nested_pattern=$2
-  local context_pattern
   local combined_context
-  while IFS= read -r context_pattern; do
-    [[ -n "$context_pattern" ]] || continue
-    if ! onbranch_conditions_overlap "$context_pattern" "$nested_pattern"; then
-      return 1
-    fi
-  done <<< "$branch_context"
   combined_context="${branch_context}"$'\n'"${nested_pattern}"
-  onbranch_context_has_compatible_fixed_prefix "$combined_context"
+  onbranch_context_has_overlap "$combined_context"
 }
 
-onbranch_parse_fixed_token() {
-  local branch_pattern=$1
-  local token_offset=$2
-  local token_character
-  local class_values
-  local class_character
-  local class_index
-  local closing_index
-  onbranch_token_type=''
-  onbranch_token_next=$token_offset
-  onbranch_token_values=''
-  if [[ "$branch_pattern" == */ ]]; then
-    onbranch_token_type=complex
-    return
+ensure_onbranch_overlap_binary() {
+  if [[ -n "$onbranch_overlap_binary" ]]; then
+    return 0
   fi
-  if (( token_offset >= ${#branch_pattern} )); then
-    onbranch_token_type=end
-    return
+  local helper_path="$repo_root/scripts/agent-runtime/onbranch_overlap.go"
+  if [[ ! -f "$helper_path" ]]; then
+    echo "ERROR: missing onbranch overlap helper: $helper_path" >&2
+    return 1
   fi
-  token_character=${branch_pattern:$token_offset:1}
-  case "$token_character" in
-    '*')
-      onbranch_token_type=star
-      ;;
-    '\\')
-      if (( token_offset + 1 >= ${#branch_pattern} )); then
-        onbranch_token_type=complex
-        return
-      fi
-      onbranch_token_type=values
-      onbranch_token_values=${branch_pattern:$((token_offset + 1)):1}
-      onbranch_token_next=$((token_offset + 2))
-      ;;
-    '[')
-      closing_index=$((token_offset + 1))
-      while (( closing_index < ${#branch_pattern} )); do
-        if [[ "${branch_pattern:$closing_index:1}" == ']' ]]; then
-          break
-        fi
-        ((closing_index += 1))
-      done
-      if (( closing_index >= ${#branch_pattern} )); then
-        onbranch_token_type=complex
-        return
-      fi
-      class_values=${branch_pattern:$((token_offset + 1)):$((closing_index - token_offset - 1))}
-      case "$class_values" in
-        '' | '!'* | '^'* | *'-'* | *'['* | *'\\'* | *':'*)
-          onbranch_token_type=complex
-          return
-          ;;
-      esac
-      onbranch_token_type=values
-      onbranch_token_next=$((closing_index + 1))
-      class_index=0
-      while (( class_index < ${#class_values} )); do
-        class_character=${class_values:$class_index:1}
-        onbranch_token_values+=$class_character
-        ((class_index += 1))
-      done
-      ;;
-    '?')
-      onbranch_token_type=any
-      onbranch_token_next=$((token_offset + 1))
-      ;;
-    *)
-      onbranch_token_type=values
-      onbranch_token_values=$token_character
-      onbranch_token_next=$((token_offset + 1))
-      ;;
-  esac
+  onbranch_overlap_binary="$conditioned_scan_root/onbranch-overlap"
+  go build -o "$onbranch_overlap_binary" "$helper_path" || {
+    echo "ERROR: cannot build onbranch overlap helper" >&2
+    return 1
+  }
 }
 
-onbranch_context_has_compatible_fixed_prefix() {
+onbranch_context_has_overlap() {
   local branch_context=$1
-  local context_pattern
   local patterns=()
-  local token_offsets=()
-  local active_patterns=()
-  local pattern_index
-  local active_count
-  local has_end
-  local has_consuming_token
-  local has_restrictive_token
-  local candidates=''
-  local filtered_candidates
-  local candidate
-  local token_value
-  local candidate_matches
-  local class_index
-  local token_index
+  local context_pattern
+  local overlap_exit
   while IFS= read -r context_pattern; do
     [[ -n "$context_pattern" ]] || continue
     patterns+=("$context_pattern")
-    token_offsets+=(0)
-    active_patterns+=(true)
   done <<< "$branch_context"
-  while true; do
-    active_count=0
-    has_end=false
-    has_consuming_token=false
-    has_restrictive_token=false
-    candidates=''
-    for ((pattern_index = 0; pattern_index < ${#patterns[@]}; pattern_index += 1)); do
-      if ! "${active_patterns[$pattern_index]}"; then
-        continue
-      fi
-      ((active_count += 1))
-      onbranch_parse_fixed_token \
-        "${patterns[$pattern_index]}" "${token_offsets[$pattern_index]}"
-      case "$onbranch_token_type" in
-        complex)
-          return 0
-          ;;
-        star)
-          active_patterns[$pattern_index]=false
-          ;;
-        end)
-          has_end=true
-          ;;
-        any)
-          has_consuming_token=true
-          token_offsets[$pattern_index]=$onbranch_token_next
-          ;;
-        values)
-          has_consuming_token=true
-          token_offsets[$pattern_index]=$onbranch_token_next
-          if ! "$has_restrictive_token"; then
-            candidates=$onbranch_token_values
-            has_restrictive_token=true
-            continue
-          fi
-          filtered_candidates=''
-          class_index=0
-          while (( class_index < ${#candidates} )); do
-            candidate=${candidates:$class_index:1}
-            candidate_matches=false
-            token_index=0
-            while (( token_index < ${#onbranch_token_values} )); do
-              token_value=${onbranch_token_values:$token_index:1}
-              if [[ "$candidate" == "$token_value" ]]; then
-                candidate_matches=true
-                break
-              fi
-              ((token_index += 1))
-            done
-            if "$candidate_matches"; then
-              filtered_candidates+=$candidate
-            fi
-            ((class_index += 1))
-          done
-          candidates=$filtered_candidates
-          ;;
-      esac
-    done
-    if "$has_end" && "$has_consuming_token"; then
-      return 1
-    fi
-    if "$has_restrictive_token" && [[ -z "$candidates" ]]; then
-      return 1
-    fi
-    if (( active_count == 0 )) || ! "$has_consuming_token"; then
+  ensure_onbranch_overlap_binary || return 2
+  set +e
+  "$onbranch_overlap_binary" -- "${patterns[@]}"
+  overlap_exit=$?
+  set -e
+  case "$overlap_exit" in
+    0)
       return 0
-    fi
-  done
+      ;;
+    1)
+      return 1
+      ;;
+    *)
+      echo "ERROR: onbranch overlap helper failed with exit $overlap_exit" >&2
+      return 2
+      ;;
+  esac
 }
 
 scan_conditioned_config() {
@@ -492,6 +289,7 @@ validate_nested_conditioned_config() {
   local protected_scan_file
   local include_scan_file
   local include_status
+  local overlap_status
   for seen_path in "${conditioned_config_files[@]}"; do
     if [[ "$seen_path" == "$seen_key" ]]; then
       return 0
@@ -531,6 +329,11 @@ validate_nested_conditioned_config() {
           nested_branch_context="${branch_context}"$'\n'"${nested_branch_pattern}"
           validate_nested_conditioned_config \
             "$worktree_path" "$nested_path" "$nested_branch_context" || return 1
+        else
+          overlap_status=$?
+          if (( overlap_status > 1 )); then
+            return 1
+          fi
         fi
         ;;
       includeif.*.path)
@@ -702,6 +505,7 @@ done
 if [[ "$mode" == "apply" ]]; then
   git config --local --unset-all remote.origin.push 2>/dev/null || true
   git config --local --unset-all remote.origin.mirror 2>/dev/null || true
+  git config --local --unset-all core.sshCommand 2>/dev/null || true
   git config --local --unset-all pull.twohead 2>/dev/null || true
   git config --local --unset-all branch.main.mergeOptions 2>/dev/null || true
   git config --local --unset-all branch.downstream/main.mergeOptions 2>/dev/null || true
@@ -734,6 +538,7 @@ for worktree_path in "${worktree_paths[@]}"; do
   validate_effective_upstream_push "$worktree_path"
   validate_effective_unset "$worktree_path" remote.origin.push
   validate_effective_unset "$worktree_path" remote.origin.mirror
+  validate_effective_unset "$worktree_path" core.sshCommand
   validate_effective_unset "$worktree_path" pull.twohead
   validate_effective_unset "$worktree_path" branch.main.mergeOptions
   validate_effective_unset "$worktree_path" branch.downstream/main.mergeOptions
