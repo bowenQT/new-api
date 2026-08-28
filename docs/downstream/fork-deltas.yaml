@@ -295,4 +295,23 @@ entries:
       - cd web && bun run typecheck
       - cd web && bun run test
     removal_condition: Remove only after the lint-only downstream changes are upstreamed, retired, or fully superseded by equivalent upstream fixes.
+  - id: downstream-readme-entrypoint
+    status: active
+    owner: downstream-maintainers
+    introduced_commit: a866d1fb328fc4e2a9ae3773f35e77b09a83f0fe
+    purpose: Identify the repository as an independently maintained downstream fork from its default README and keep inherited local installation links usable.
+    paths:
+      - README.md
+      - README.en.md
+      - README.fr.md
+      - README.ja.md
+      - README.zh_TW.md
+    upstream_touchpoints:
+      - default-branch project documentation
+      - localized installation guide navigation
+    conflict_risk: low
+    verification:
+      - verify every modified README local link resolves in the repository
+      - scripts/agent-runtime/verify.sh docs
+    removal_condition: Retain the README.md notice while the fork is independently maintained; remove link-only deviations if the inherited documentation ships equivalent corrections.
     upstream_reference: null
