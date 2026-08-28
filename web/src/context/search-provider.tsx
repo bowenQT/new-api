@@ -16,16 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { createContext, useContext, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { CommandMenu } from '@/components/command-menu'
-
-type SearchContextType = {
-  open: boolean
-  setOpen: React.Dispatch<React.SetStateAction<boolean>>
-}
-
-const SearchContext = createContext<SearchContextType | null>(null)
+import { SearchContext, useSearch } from '@/context/search-context'
 
 type SearchProviderProps = {
   children: React.ReactNode
@@ -53,13 +47,6 @@ export function SearchProvider({ children }: SearchProviderProps) {
   )
 }
 
+// Re-exported so existing consumers keep importing from the provider module.
 // eslint-disable-next-line react-refresh/only-export-components
-export const useSearch = () => {
-  const searchContext = useContext(SearchContext)
-
-  if (!searchContext) {
-    throw new Error('useSearch has to be used within SearchProvider')
-  }
-
-  return searchContext
-}
+export { useSearch }

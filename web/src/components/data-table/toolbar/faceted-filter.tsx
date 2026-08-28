@@ -128,6 +128,33 @@ function DataTableFacetedFilterInner<TData, TValue>({
             <CommandGroup>
               {options.map((option) => {
                 const isSelected = selectedValues.has(option.value)
+                let optionIcon: React.ReactNode = null
+                if (option.iconNode) {
+                  optionIcon = (
+                    <span className='text-muted-foreground flex size-4 items-center justify-center'>
+                      {option.iconNode}
+                    </span>
+                  )
+                } else if (option.icon) {
+                  optionIcon = (
+                    <option.icon className='text-muted-foreground size-4' />
+                  )
+                }
+                const facetCount = facets?.get(option.value)
+                let countBadge: React.ReactNode = null
+                if (typeof option.count === 'number') {
+                  countBadge = (
+                    <span className='text-muted-foreground ms-auto flex h-4 min-w-4 items-center justify-center font-mono text-xs'>
+                      {option.count}
+                    </span>
+                  )
+                } else if (facetCount) {
+                  countBadge = (
+                    <span className='ms-auto flex h-4 w-4 items-center justify-center font-mono text-xs'>
+                      {facetCount}
+                    </span>
+                  )
+                }
                 return (
                   <CommandItem
                     key={option.value}
@@ -143,28 +170,14 @@ function DataTableFacetedFilterInner<TData, TValue>({
                     >
                       <CheckIcon className={cn('text-background h-4 w-4')} />
                     </div>
-                    {option.iconNode ? (
-                      <span className='text-muted-foreground flex size-4 items-center justify-center'>
-                        {option.iconNode}
-                      </span>
-                    ) : option.icon ? (
-                      <option.icon className='text-muted-foreground size-4' />
-                    ) : null}
+                    {optionIcon}
                     <span
                       className='min-w-0 flex-1 truncate'
                       title={t(option.label)}
                     >
                       {t(option.label)}
                     </span>
-                    {typeof option.count === 'number' ? (
-                      <span className='text-muted-foreground ms-auto flex h-4 min-w-4 items-center justify-center font-mono text-xs'>
-                        {option.count}
-                      </span>
-                    ) : facets?.get(option.value) ? (
-                      <span className='ms-auto flex h-4 w-4 items-center justify-center font-mono text-xs'>
-                        {facets.get(option.value)}
-                      </span>
-                    ) : null}
+                    {countBadge}
                   </CommandItem>
                 )
               })}

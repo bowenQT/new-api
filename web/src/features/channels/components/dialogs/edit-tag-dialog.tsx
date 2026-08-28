@@ -305,9 +305,9 @@ export function EditTagDialog({ open, onOpenChange }: EditTagDialogProps) {
                 <div className='flex gap-2'>
                   <Select<string>
                     items={availableModels.map((model) => ({
-                        value: model,
-                        label: model,
-                      }))}
+                      value: model,
+                      label: model,
+                    }))}
                     onValueChange={(value) => {
                       if (value === null) return
                       if (!selectedModels.includes(value)) {

@@ -154,6 +154,10 @@ function ChatRouteComponent() {
   }
 
   return (
+    // Embeds full third-party chat apps (admin-configured URLs) that need
+    // both scripts and their own origin storage; a sandbox allowing both is
+    // treated as invalid by this rule and would grant no isolation anyway.
+    // oxlint-disable-next-line react/iframe-missing-sandbox
     <iframe
       src={iframeSrc}
       key={iframeSrc}
