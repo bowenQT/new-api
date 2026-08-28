@@ -332,8 +332,9 @@ function formatTokenHint(n: number | string | null | undefined): string {
 
 function formatNumberDraft(value: number | string): string {
   if (value === '') return ''
-  if (typeof value === 'number')
+  if (typeof value === 'number') {
     return Number.isFinite(value) ? String(value) : '0'
+  }
   return value
 }
 
@@ -345,6 +346,71 @@ function parseNumberDraft(value: string): number {
 
 function isZeroDraft(value: string): boolean {
   return value.trim() !== '' && parseNumberDraft(value) === 0
+}
+
+// ---------------------------------------------------------------------------
+// Stable row ids for editable lists whose items carry no id of their own
+// (tiers, tier conditions, rule groups, rule conditions).
+//
+// The id is a frontend-only `__rowId` field attached to the editing-state
+// objects: assigned once per row when a dataset is parsed or a row is added,
+// preserved across in-place edits (change handlers carry it onto the next
+// value), and stripped before any expression is generated. Removing a row
+// therefore unmounts only that row; every other card keeps its key and its
+// local UI state (expanded panels, input drafts, focus).
+// ---------------------------------------------------------------------------
+
+let rowIdSeed = 0
+function nextRowId(): string {
+  rowIdSeed += 1
+  return `row-${rowIdSeed}`
+}
+
+type RowIdCarrier = { __rowId?: string }
+
+function ensureRowId<T extends object>(row: T): T {
+  if ((row as RowIdCarrier).__rowId) return row
+  return { ...row, __rowId: nextRowId() }
+}
+
+function keepRowId<T extends object>(next: T, prev: object | undefined): T {
+  const prevId = (prev as RowIdCarrier | undefined)?.__rowId
+  if (!prevId) return ensureRowId(next)
+  if ((next as RowIdCarrier).__rowId === prevId) return next
+  return { ...next, __rowId: prevId }
+}
+
+function rowKeyOf(row: object): string {
+  return (row as RowIdCarrier).__rowId ?? ''
+}
+
+function stripRowId<T extends object>(row: T): T {
+  if (!(row as RowIdCarrier).__rowId) return row
+  const copy = { ...row } as T & RowIdCarrier
+  delete copy.__rowId
+  return copy
+}
+
+function stripVisualConfigRowIds(
+  config: VisualConfig | null
+): VisualConfig | null {
+  if (!config) return config
+  return {
+    ...config,
+    tiers: config.tiers.map((tier) => ({
+      ...stripRowId(tier),
+      conditions: (tier.conditions ?? []).map((condition) =>
+        stripRowId(condition)
+      ),
+    })),
+  }
+}
+
+function stripRuleGroupRowIds(groups: RequestRuleGroup[]): RequestRuleGroup[] {
+  return groups.map((group) => ({
+    ...stripRowId(group),
+    conditions: group.conditions.map((condition) => stripRowId(condition)),
+  }))
 }
 
 type DraftNumberInputProps = Omit<
@@ -436,12 +502,10 @@ function ConditionRow({ condition, onChange, onRemove }: ConditionRowProps) {
   return (
     <div className='flex items-center gap-2'>
       <Select
-        items={[
-          ...CONDITION_INPUT_OPTIONS.map((option) => ({
-            value: option.value,
-            label: t(option.labelKey),
-          })),
-        ]}
+        items={CONDITION_INPUT_OPTIONS.map((option) => ({
+          value: option.value,
+          label: t(option.labelKey),
+        }))}
         value={condition.var}
         onValueChange={(value) =>
           onChange({ ...condition, var: value as TierConditionInput['var'] })
@@ -563,7 +627,10 @@ function VisualTierCard({
     next: TierConditionInput
   ) => {
     const conditions = [...tier.conditions]
-    conditions[conditionIndex] = next
+    conditions[conditionIndex] = keepRowId(
+      next,
+      tier.conditions[conditionIndex]
+    )
     onChange({ ...tier, conditions })
   }
 
@@ -667,7 +734,7 @@ function VisualTierCard({
         ) : (
           tier.conditions.map((condition, conditionIndex) => (
             <ConditionRow
-              key={conditionIndex}
+              key={rowKeyOf(condition)}
               condition={condition}
               onChange={(next) => handleConditionChange(conditionIndex, next)}
               onRemove={() => handleConditionRemove(conditionIndex)}
@@ -776,14 +843,28 @@ type VisualEditorProps = {
 
 function VisualEditor({ visualConfig, onChange }: VisualEditorProps) {
   const { t } = useTranslation()
-  const config = useMemo(
-    () => normalizeVisualConfig(visualConfig),
-    [visualConfig]
-  )
+  // Normalize, then make sure every tier and condition carries a stable
+  // frontend-only row id. Rows that already have one (anything that has been
+  // through an edit) keep it; only freshly parsed or freshly added rows get a
+  // new id, so ids are assigned exactly once per row per dataset.
+  const config = useMemo(() => {
+    const normalized = normalizeVisualConfig(visualConfig)
+    return {
+      ...normalized,
+      tiers: normalized.tiers.map((tier) =>
+        ensureRowId({
+          ...tier,
+          conditions: tier.conditions.map((condition) =>
+            ensureRowId(condition)
+          ),
+        })
+      ),
+    }
+  }, [visualConfig])
 
   const handleTierChange = (index: number, next: VisualTier) => {
     const tiers = [...config.tiers]
-    tiers[index] = normalizeVisualTier(next)
+    tiers[index] = keepRowId(normalizeVisualTier(next), config.tiers[index])
     onChange({ ...config, tiers })
   }
 
@@ -794,18 +875,29 @@ function VisualEditor({ visualConfig, onChange }: VisualEditorProps) {
     // upper-bound condition so the expression compiles into a sane two-tier
     // shape with an immediately useful fallback.
     if (lastIndex >= 0 && tiers[lastIndex].conditions.length === 0) {
-      tiers[lastIndex] = normalizeVisualTier({
-        ...tiers[lastIndex],
-        conditions: [{ var: 'len', op: '<', value: 200000 }],
-      })
+      tiers[lastIndex] = keepRowId(
+        normalizeVisualTier({
+          ...tiers[lastIndex],
+          conditions: [
+            ensureRowId<TierConditionInput>({
+              var: 'len',
+              op: '<',
+              value: 200000,
+            }),
+          ],
+        }),
+        tiers[lastIndex]
+      )
     }
     tiers.push(
-      normalizeVisualTier({
-        label: `tier_${tiers.length + 1}`,
-        conditions: [],
-        input_unit_cost: 0,
-        output_unit_cost: 0,
-      })
+      ensureRowId(
+        normalizeVisualTier({
+          label: `tier_${tiers.length + 1}`,
+          conditions: [],
+          input_unit_cost: 0,
+          output_unit_cost: 0,
+        })
+      )
     )
     onChange({ ...config, tiers })
   }
@@ -832,7 +924,11 @@ function VisualEditor({ visualConfig, onChange }: VisualEditorProps) {
               ...current,
               conditions: [
                 ...tier.conditions,
-                { var: nextVar, op: '<', value: 200000 },
+                ensureRowId<TierConditionInput>({
+                  var: nextVar,
+                  op: '<',
+                  value: 200000,
+                }),
               ],
             }
           : current
@@ -849,7 +945,7 @@ function VisualEditor({ visualConfig, onChange }: VisualEditorProps) {
       </p>
       {config.tiers.map((tier, index) => (
         <VisualTierCard
-          key={index}
+          key={rowKeyOf(tier)}
           tier={tier}
           index={index}
           total={config.tiers.length}
@@ -967,12 +1063,12 @@ function RuleConditionRow({
         return timeFunc
     }
   }
-  const sourceLabel =
-    condition.source === SOURCE_PARAM
-      ? t('Body param')
-      : condition.source === SOURCE_HEADER
-        ? t('Header')
-        : t('Time')
+  let sourceLabel = t('Time')
+  if (condition.source === SOURCE_PARAM) {
+    sourceLabel = t('Body param')
+  } else if (condition.source === SOURCE_HEADER) {
+    sourceLabel = t('Header')
+  }
 
   const handleSourceChange = (source: string) => {
     if (source === SOURCE_TIME) {
@@ -992,12 +1088,10 @@ function RuleConditionRow({
   const renderTimeCondition = (timeCond: TimeCondition) => (
     <>
       <Select
-        items={[
-          ...TIME_FUNCS.map((fn) => ({
-            value: fn,
-            label: getTimeFuncLabel(fn),
-          })),
-        ]}
+        items={TIME_FUNCS.map((fn) => ({
+          value: fn,
+          label: getTimeFuncLabel(fn),
+        }))}
         value={timeCond.timeFunc}
         onValueChange={(value) =>
           onChange({ ...timeCond, timeFunc: value as TimeFunc })
@@ -1017,12 +1111,10 @@ function RuleConditionRow({
         </SelectContent>
       </Select>
       <Select
-        items={[
-          ...COMMON_TIMEZONES.map((tz) => ({
-            value: tz.value,
-            label: tz.label,
-          })),
-        ]}
+        items={COMMON_TIMEZONES.map((tz) => ({
+          value: tz.value,
+          label: tz.label,
+        }))}
         value={timeCond.timezone}
         onValueChange={(value) =>
           value !== null && onChange({ ...timeCond, timezone: value })
@@ -1045,12 +1137,10 @@ function RuleConditionRow({
         </SelectContent>
       </Select>
       <Select
-        items={[
-          ...matchOptions.map((option) => ({
-            value: option.value,
-            label: getMatchLabel(option.value),
-          })),
-        ]}
+        items={matchOptions.map((option) => ({
+          value: option.value,
+          label: getMatchLabel(option.value),
+        }))}
         value={timeCond.mode}
         onValueChange={(v) => v !== null && handleModeChange(v)}
       >
@@ -1111,12 +1201,10 @@ function RuleConditionRow({
         className='w-44'
       />
       <Select
-        items={[
-          ...matchOptions.map((option) => ({
-            value: option.value,
-            label: getMatchLabel(option.value),
-          })),
-        ]}
+        items={matchOptions.map((option) => ({
+          value: option.value,
+          label: getMatchLabel(option.value),
+        }))}
         value={phCond.mode}
         onValueChange={(v) => v !== null && handleModeChange(v)}
       >
@@ -1208,7 +1296,10 @@ function RuleGroupCard({
     next: RequestCondition
   ) => {
     const conditions = [...group.conditions]
-    conditions[conditionIndex] = next
+    conditions[conditionIndex] = keepRowId(
+      next,
+      group.conditions[conditionIndex]
+    )
     onChange({ ...group, conditions })
   }
 
@@ -1217,7 +1308,9 @@ function RuleGroupCard({
       ...group,
       conditions: [
         ...group.conditions,
-        timeMode ? createEmptyTimeCondition() : createEmptyCondition(),
+        ensureRowId<RequestCondition>(
+          timeMode ? createEmptyTimeCondition() : createEmptyCondition()
+        ),
       ],
     })
   }
@@ -1241,7 +1334,7 @@ function RuleGroupCard({
       <div className='space-y-2'>
         {group.conditions.map((condition, conditionIndex) => (
           <RuleConditionRow
-            key={conditionIndex}
+            key={rowKeyOf(condition)}
             condition={condition}
             onChange={(next) => handleConditionChange(conditionIndex, next)}
             onRemove={() =>
@@ -1562,7 +1655,7 @@ function LlmPromptHelper({ modelName }: LlmPromptHelperProps) {
 
   const prompt = useMemo(() => {
     if (modelName) {
-      return LLM_PROMPT_TEMPLATE + `\n\nCurrent model: ${modelName}`
+      return `${LLM_PROMPT_TEMPLATE}\n\nCurrent model: ${modelName}`
     }
     return LLM_PROMPT_TEMPLATE
   }, [modelName])
@@ -1649,6 +1742,21 @@ export const TieredPricingEditor = memo(function TieredPricingEditor({
   const [requestRuleGroups, setRequestRuleGroups] = useState<
     RequestRuleGroup[]
   >(() => tryParseRequestRuleExpr(currentRequestRuleExpr) || [])
+  // Same row-id scheme as the visual tier editor: parsed or freshly added
+  // groups/conditions get a stable frontend-only id exactly once; edits keep
+  // it, so removing a group unmounts only that group's card.
+  const keyedRuleGroups = useMemo(
+    () =>
+      requestRuleGroups.map((group) =>
+        ensureRowId({
+          ...group,
+          conditions: group.conditions.map((condition) =>
+            ensureRowId(condition)
+          ),
+        })
+      ),
+    [requestRuleGroups]
+  )
   const initRef = useRef(false)
 
   useEffect(() => {
@@ -1682,7 +1790,7 @@ export const TieredPricingEditor = memo(function TieredPricingEditor({
 
   const effectiveExpr = useMemo(() => {
     if (editorMode === 'visual') {
-      return generateExprFromVisualConfig(visualConfig)
+      return generateExprFromVisualConfig(stripVisualConfigRowIds(visualConfig))
     }
     const { billingExpr } = splitBillingExprAndRequestRules(rawExpr)
     return billingExpr
@@ -1696,7 +1804,9 @@ export const TieredPricingEditor = memo(function TieredPricingEditor({
 
   useEffect(() => {
     if (editorMode !== 'visual') return
-    const ruleExpr = buildRequestRuleExpr(requestRuleGroups)
+    const ruleExpr = buildRequestRuleExpr(
+      stripRuleGroupRowIds(requestRuleGroups)
+    )
     if (ruleExpr !== currentRequestRuleExpr) {
       onRequestRuleExprChange(ruleExpr)
     }
@@ -1736,8 +1846,12 @@ export const TieredPricingEditor = memo(function TieredPricingEditor({
         setRequestRuleGroups(parsedGroups || [])
         onRequestRuleExprChange(ruleStr)
       } else {
-        const expr = generateExprFromVisualConfig(visualConfig)
-        const ruleExpr = buildRequestRuleExpr(requestRuleGroups)
+        const expr = generateExprFromVisualConfig(
+          stripVisualConfigRowIds(visualConfig)
+        )
+        const ruleExpr = buildRequestRuleExpr(
+          stripRuleGroupRowIds(requestRuleGroups)
+        )
         setRawExpr(combineBillingExpr(expr, ruleExpr) || expr)
       }
       setEditorMode(next)
@@ -1835,19 +1949,22 @@ export const TieredPricingEditor = memo(function TieredPricingEditor({
               </Alert>
             ) : (
               <>
-                {requestRuleGroups.map((group, groupIndex) => (
+                {keyedRuleGroups.map((group, groupIndex) => (
                   <RuleGroupCard
-                    key={groupIndex}
+                    key={rowKeyOf(group)}
                     group={group}
                     index={groupIndex}
                     onChange={(next) => {
-                      const updated = [...requestRuleGroups]
-                      updated[groupIndex] = next
+                      const updated = [...keyedRuleGroups]
+                      updated[groupIndex] = keepRowId(
+                        next,
+                        keyedRuleGroups[groupIndex]
+                      )
                       handleRuleGroupsChange(updated)
                     }}
                     onRemove={() =>
                       handleRuleGroupsChange(
-                        requestRuleGroups.filter((_, i) => i !== groupIndex)
+                        keyedRuleGroups.filter((_, i) => i !== groupIndex)
                       )
                     }
                   />
@@ -1858,8 +1975,8 @@ export const TieredPricingEditor = memo(function TieredPricingEditor({
                   className='h-9 w-36 justify-center'
                   onClick={() =>
                     handleRuleGroupsChange([
-                      ...requestRuleGroups,
-                      createEmptyRuleGroup(),
+                      ...keyedRuleGroups,
+                      ensureRowId(createEmptyRuleGroup()),
                     ])
                   }
                 >

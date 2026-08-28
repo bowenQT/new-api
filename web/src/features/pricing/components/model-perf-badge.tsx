@@ -70,6 +70,16 @@ export const ModelPerfBadge = memo(function ModelPerfBadge(
     ...Array(Math.max(0, 3 - statusRates.length)).fill(null),
     ...statusRates,
   ].slice(-3)
+  // Three fixed positional slots (oldest -> latest) with per-slot styling.
+  const statusBarSlots = [
+    { id: 'oldest', heightClass: 'h-2', emptyClass: 'bg-muted-foreground/10' },
+    {
+      id: 'middle',
+      heightClass: 'h-2.5',
+      emptyClass: 'bg-muted-foreground/15',
+    },
+    { id: 'latest', heightClass: 'h-3', emptyClass: 'bg-muted-foreground/15' },
+  ].map((slot, index) => ({ ...slot, rate: statusBars[index] ?? null }))
 
   return (
     <div
@@ -102,19 +112,15 @@ export const ModelPerfBadge = memo(function ModelPerfBadge(
           {t('Status short')}
         </div>
         <div className='flex h-4 items-center justify-end gap-0.5'>
-          {statusBars.map((rate, index) => (
+          {statusBarSlots.map((slot) => (
             <span
-              key={`${index}-${rate ?? 'empty'}`}
+              key={slot.id}
               className={cn(
                 'w-1 rounded-full',
-                index === 0 && 'h-2',
-                index === 1 && 'h-2.5',
-                index === 2 && 'h-3',
-                rate == null
-                  ? index === 0
-                    ? 'bg-muted-foreground/10'
-                    : 'bg-muted-foreground/15'
-                  : getSuccessRateDotClass(rate)
+                slot.heightClass,
+                slot.rate == null
+                  ? slot.emptyClass
+                  : getSuccessRateDotClass(slot.rate)
               )}
             />
           ))}

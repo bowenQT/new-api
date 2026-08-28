@@ -93,9 +93,10 @@ export function VendorMutateDialog({
   const onSubmit = async (values: Record<string, unknown>) => {
     setIsSaving(true)
     try {
-      const response = isEdit
-        ? await updateVendor({ ...values, id: currentVendor!.id })
-        : await createVendor(values)
+      const response =
+        isEdit && currentVendor
+          ? await updateVendor({ ...values, id: currentVendor.id })
+          : await createVendor(values)
 
       if (response.success) {
         toast.success(
@@ -112,6 +113,11 @@ export function VendorMutateDialog({
     } finally {
       setIsSaving(false)
     }
+  }
+
+  let submitLabel = isEdit ? t('Update') : t('Create')
+  if (isSaving) {
+    submitLabel = t('Saving...')
   }
 
   return (
@@ -146,7 +152,7 @@ export function VendorMutateDialog({
             {isSaving ? (
               <Loader2 className='mr-2 h-4 w-4 animate-spin' />
             ) : null}
-            {isSaving ? t('Saving...') : isEdit ? t('Update') : t('Create')}
+            {submitLabel}
           </Button>
         </>
       }
