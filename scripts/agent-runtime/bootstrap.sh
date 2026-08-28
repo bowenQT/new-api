@@ -78,8 +78,10 @@ matches_github_repo() {
   return 1
 }
 
-protected_config_regex='^(remote\.(origin|upstream)\.(fetch|url|pushurl)|remote\.origin\.(mirror|push)|remote\.pushdefault|url\..*\.(insteadof|pushinsteadof)|core\.sshcommand|push\.default|pull\.(ff|twohead)|fetch\.prune|rebase\.autostash|merge\.autostash|merge\.conflictstyle|rerere\.enabled|rerere\.autoupdate|branch\..*\.pushremote|branch\.main\.(remote|merge|mergeoptions)|branch\.downstream/main\.(remote|merge|mergeoptions))$'
+ssh_remote_configured=false
+protected_config_regex='^(remote\.(origin|upstream)\.(fetch|url|pushurl|vcs)|remote\.origin\.(mirror|push)|remote\.pushdefault|url\..*\.(insteadof|pushinsteadof)|core\.sshcommand|push\.default|pull\.(ff|twohead)|fetch\.prune|rebase\.autostash|merge\.autostash|merge\.conflictstyle|rerere\.enabled|rerere\.autoupdate|branch\..*\.pushremote|branch\.main\.(remote|merge|mergeoptions)|branch\.downstream/main\.(remote|merge|mergeoptions))$'
 conditioned_config_files=()
+conditioned_config_stack=()
 onbranch_overlap_binary=''
 conditioned_scan_root=$(mktemp -d "${TMPDIR:-/tmp}/newapi-conditioned-scan.XXXXXX")
 
@@ -140,7 +142,7 @@ resolve_include_path() {
         *)
           printf '%s/%s\n' "$origin_dir" "$expanded_include_path"
           ;;
-      esac
+    esac
       ;;
   esac
 }
@@ -290,12 +292,20 @@ validate_nested_conditioned_config() {
   local include_scan_file
   local include_status
   local overlap_status
+  local stack_index
+  for seen_path in "${conditioned_config_stack[@]}"; do
+    if [[ "$seen_path" == "$config_path" ]]; then
+      echo "ERROR: branch-conditioned include cycle: $config_path" >&2
+      return 1
+    fi
+  done
   for seen_path in "${conditioned_config_files[@]}"; do
     if [[ "$seen_path" == "$seen_key" ]]; then
       return 0
     fi
   done
-  conditioned_config_files+=("$seen_key")
+  stack_index=${#conditioned_config_stack[@]}
+  conditioned_config_stack+=("$config_path")
   if [[ ! -f "$config_path" ]]; then
     echo "ERROR: branch-conditioned include is unavailable: $config_path" >&2
     return 1
@@ -347,8 +357,10 @@ validate_nested_conditioned_config() {
           fi
         fi
         ;;
-    esac
+      esac
   done < "$include_scan_file"
+  unset "conditioned_config_stack[$stack_index]"
+  conditioned_config_files+=("$seen_key")
 }
 
 validate_conditioned_config_file() {
@@ -360,6 +372,7 @@ validate_conditioned_config_file() {
     return 1
   fi
   conditioned_config_files=()
+  conditioned_config_stack=()
   validate_nested_conditioned_config \
     "$worktree_path" "$config_path" "$branch_context"
 }
@@ -432,6 +445,11 @@ validate_effective_urls() {
       echo "ERROR: unexpected effective $remote_name $url_mode URL in worktree $worktree_path: $effective_url" >&2
       return 1
     fi
+    case "$effective_url" in
+      git@github.com:* | ssh://git@github.com/*)
+        ssh_remote_configured=true
+        ;;
+    esac
   done < <(git -C "$worktree_path" "${git_args[@]}")
   if ! "$found"; then
     echo "ERROR: missing effective $remote_name $url_mode URL in worktree $worktree_path" >&2
@@ -481,6 +499,15 @@ for worktree_path in "${worktree_paths[@]}"; do
   validate_effective_urls "$worktree_path" upstream QuantumNous/new-api fetch
 done
 
+if "$ssh_remote_configured"; then
+  for ssh_environment_key in GIT_SSH_COMMAND GIT_SSH; do
+    if [[ -n "${!ssh_environment_key:-}" ]]; then
+      echo "ERROR: $ssh_environment_key must be unset for SSH remotes" >&2
+      exit 1
+    fi
+  done
+fi
+
 origin_url=$(git remote get-url origin)
 upstream_url=$(git remote get-url upstream)
 
@@ -505,6 +532,8 @@ done
 if [[ "$mode" == "apply" ]]; then
   git config --local --unset-all remote.origin.push 2>/dev/null || true
   git config --local --unset-all remote.origin.mirror 2>/dev/null || true
+  git config --local --unset-all remote.origin.vcs 2>/dev/null || true
+  git config --local --unset-all remote.upstream.vcs 2>/dev/null || true
   git config --local --unset-all core.sshCommand 2>/dev/null || true
   git config --local --unset-all pull.twohead 2>/dev/null || true
   git config --local --unset-all branch.main.mergeOptions 2>/dev/null || true
@@ -538,6 +567,8 @@ for worktree_path in "${worktree_paths[@]}"; do
   validate_effective_upstream_push "$worktree_path"
   validate_effective_unset "$worktree_path" remote.origin.push
   validate_effective_unset "$worktree_path" remote.origin.mirror
+  validate_effective_unset "$worktree_path" remote.origin.vcs
+  validate_effective_unset "$worktree_path" remote.upstream.vcs
   validate_effective_unset "$worktree_path" core.sshCommand
   validate_effective_unset "$worktree_path" pull.twohead
   validate_effective_unset "$worktree_path" branch.main.mergeOptions
