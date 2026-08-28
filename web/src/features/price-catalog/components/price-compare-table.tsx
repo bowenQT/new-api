@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { ChevronDown, ChevronRight } from 'lucide-react'
-import { Fragment, useMemo, useState } from 'react'
+import { Fragment, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Badge } from '@/components/ui/badge'
@@ -37,22 +37,12 @@ import {
   PROJECTION_LABEL_KEYS,
   SALE_BILLING_MODE_LABEL_KEYS,
 } from '../constants'
-import {
-  catalogEntryKey,
-  formatMarginRate,
-  formatUsdAmount,
-} from '../lib/compare-format'
-import type {
-  CurrentPriceEntry,
-  PriceCompareEntry,
-  PriceCompareSourcePrice,
-} from '../types'
+import { formatMarginRate, formatUsdAmount } from '../lib/compare-format'
+import type { PriceCompareEntry, PriceCompareSourcePrice } from '../types'
 import { CatalogFlagBadges, RoleBadge } from './catalog-badges'
 
 type Props = {
   entries: PriceCompareEntry[]
-  /** Current catalog entries, used for the `fetched_at` / `effective_at` evidence. */
-  catalogEntries: CurrentPriceEntry[]
 }
 
 function SourcePriceLines(props: {
@@ -83,17 +73,6 @@ function SourcePriceLines(props: {
 export function PriceCompareTable(props: Props) {
   const { t } = useTranslation()
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
-
-  const catalogByKey = useMemo(() => {
-    const index = new Map<string, CurrentPriceEntry>()
-    for (const entry of props.catalogEntries) {
-      index.set(
-        catalogEntryKey(entry.source_id, entry.source_model_name),
-        entry
-      )
-    }
-    return index
-  }, [props.catalogEntries])
 
   const toggle = (model: string) => {
     setExpanded((previous) => {
@@ -288,12 +267,6 @@ export function PriceCompareTable(props: Props) {
                     <TableCell colSpan={8} className='px-3 py-3'>
                       <div className='space-y-2'>
                         {detailRows.map((price) => {
-                          const catalogEntry = catalogByKey.get(
-                            catalogEntryKey(
-                              price.source_id,
-                              price.source_model_name
-                            )
-                          )
                           return (
                             <div
                               key={`${price.source_id}-${price.source_model_name}`}
@@ -375,9 +348,7 @@ export function PriceCompareTable(props: Props) {
                                     {t('Fetched at')}:{' '}
                                   </dt>
                                   <dd className='inline'>
-                                    {formatTimestampToDate(
-                                      catalogEntry?.fetched_at
-                                    )}
+                                    {formatTimestampToDate(price.fetched_at)}
                                   </dd>
                                 </div>
                                 <div>
@@ -385,9 +356,7 @@ export function PriceCompareTable(props: Props) {
                                     {t('Effective at')}:{' '}
                                   </dt>
                                   <dd className='inline'>
-                                    {formatTimestampToDate(
-                                      catalogEntry?.effective_at
-                                    )}
+                                    {formatTimestampToDate(price.effective_at)}
                                   </dd>
                                 </div>
                               </dl>

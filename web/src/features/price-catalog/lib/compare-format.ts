@@ -57,14 +57,3 @@ export function usageVectorKey(usage: {
 }): string {
   return `${usage.p}/${usage.c}/${usage.cr}/${usage.cc}`
 }
-
-/**
- * Key joining a comparison source price back to its catalog entry, which is
- * where `fetched_at` and `effective_at` live (spec §8.3).
- */
-export function catalogEntryKey(
-  sourceId: number,
-  sourceModelName: string
-): string {
-  return `${sourceId}::${sourceModelName}`
-}

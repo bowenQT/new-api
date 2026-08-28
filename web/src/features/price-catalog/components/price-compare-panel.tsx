@@ -38,7 +38,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { formatTimestampToDate } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
-import { comparePrices, getCurrentPrices, listSaleGroups } from '../api'
+import { comparePrices, listSaleGroups } from '../api'
 import {
   DEFAULT_COMPARE_GROUP,
   DEFAULT_COMPARE_USAGE,
@@ -105,22 +105,6 @@ export function PriceComparePanel() {
     retry: false,
   })
 
-  // `fetched_at` and `effective_at` are only carried by the catalog entries,
-  // so the evidence shown per source row is joined in from there (spec §8.3).
-  const catalogQuery = useQuery({
-    queryKey: priceCatalogQueryKeys.currentPrices,
-    queryFn: async () => {
-      const res = await getCurrentPrices()
-      if (!res.success || !res.data) {
-        throw new Error(
-          res.message || t('We could not load the price catalog.')
-        )
-      }
-      return res.data
-    },
-    retry: false,
-  })
-
   const entries = useMemo(() => {
     const all = compareQuery.data?.entries ?? []
     const needle = modelFilter.trim().toLowerCase()
@@ -165,7 +149,6 @@ export function PriceComparePanel() {
             size='sm'
             onClick={() => {
               void compareQuery.refetch()
-              void catalogQuery.refetch()
             }}
             disabled={compareQuery.isFetching}
           >
@@ -360,10 +343,7 @@ export function PriceComparePanel() {
       )}
 
       {!compareQuery.isLoading && !compareQuery.isError && (
-        <PriceCompareTable
-          entries={entries}
-          catalogEntries={catalogQuery.data?.entries ?? []}
-        />
+        <PriceCompareTable entries={entries} />
       )}
     </div>
   )
