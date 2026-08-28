@@ -368,6 +368,11 @@ entries:
       - web/src/features/price-catalog/components/price-source-mutate-drawer.tsx
       - web/src/features/price-catalog/components/price-source-sync-dialog.tsx
       - web/src/features/price-catalog/components/price-sources-panel.tsx
+      - web/src/features/price-catalog/components/__tests__/price-compare-panel.test.tsx
+      - web/src/features/price-catalog/components/__tests__/price-compare-table.test.tsx
+      - web/src/features/price-catalog/components/__tests__/price-source-mutate-drawer.test.tsx
+      - web/src/features/price-catalog/components/__tests__/price-source-sync-dialog.test.tsx
+      - web/src/features/price-catalog/components/__tests__/price-sources-panel.test.tsx
       - web/src/features/price-catalog/constants.ts
       - web/src/features/price-catalog/index.tsx
       - web/src/features/price-catalog/lib/compare-format.ts
@@ -389,7 +394,7 @@ entries:
       - generated TanStack route tree in web/src/routeTree.gen.ts
       - shared frontend i18n locale files and the i18n:sync report
       - RootAuth API groups /api/upstream-price-sources and /api/upstream-prices
-      - the adapter registry catalog, served by GET /api/upstream-price-sources/adapters; web/src/features/price-catalog/constants.ts still holds a local copy until the UI reads that endpoint
+      - the adapter registry catalog, served by GET /api/upstream-price-sources/adapters; the UI now reads that endpoint for every adapter role, scope, channel requirement and endpoint, and web/src/features/price-catalog/constants.ts keeps only the untranslated adapter display names
     conflict_risk: medium
     verification:
       - cd web && bun run typecheck
