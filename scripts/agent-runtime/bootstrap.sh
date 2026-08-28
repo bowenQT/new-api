@@ -78,13 +78,14 @@ matches_github_repo() {
   return 1
 }
 
-protected_config_regex='^(remote\.(origin|upstream)\.(url|pushurl)|remote\.origin\.(fetch|mirror|push)|remote\.pushdefault|url\..*\.(insteadof|pushinsteadof)|push\.default|pull\.ff|fetch\.prune|rebase\.autostash|merge\.autostash|merge\.conflictstyle|rerere\.enabled|rerere\.autoupdate|branch\..*\.pushremote|branch\.main\.(remote|merge)|branch\.downstream/main\.(remote|merge))$'
+protected_config_regex='^(remote\.(origin|upstream)\.(fetch|url|pushurl)|remote\.origin\.(mirror|push)|remote\.pushdefault|url\..*\.(insteadof|pushinsteadof)|push\.default|pull\.ff|fetch\.prune|rebase\.autostash|merge\.autostash|merge\.conflictstyle|rerere\.enabled|rerere\.autoupdate|branch\..*\.pushremote|branch\.main\.(remote|merge)|branch\.downstream/main\.(remote|merge))$'
 conditioned_config_files=()
 
 resolve_include_path() {
   local worktree_path=$1
   local origin=$2
   local include_path=$3
+  local expanded_include_path
   local origin_path
   local origin_dir
   case "$origin" in
@@ -108,32 +109,90 @@ resolve_include_path() {
     return 1
   }
   case "$include_path" in
-    /*)
-      printf '%s\n' "$include_path"
-      ;;
-    '~/'*)
-      printf '%s/%s\n' "${HOME}" "${include_path:2}"
-      ;;
     '%(home)/'*)
       printf '%s/%s\n' "${HOME}" "${include_path#%(home)/}"
       ;;
-    '%('* | '~'*)
+    '%('*)
       echo "ERROR: cannot safely resolve branch-conditioned include path: $include_path" >&2
       return 1
       ;;
     *)
-      printf '%s/%s\n' "$origin_dir" "$include_path"
+      expanded_include_path=$(git -c "agentRuntime.includePath=$include_path" \
+        config --type=path --get agentRuntime.includePath 2>/dev/null) || {
+        echo "ERROR: cannot safely resolve branch-conditioned include path: $include_path" >&2
+        return 1
+      }
+      case "$expanded_include_path" in
+        /*)
+          printf '%s\n' "$expanded_include_path"
+          ;;
+        *)
+          printf '%s/%s\n' "$origin_dir" "$expanded_include_path"
+          ;;
+      esac
       ;;
   esac
 }
 
-branch_matches_onbranch_condition() {
-  local branch_name=$1
-  local branch_pattern=$2
+onbranch_condition_is_exact() {
+  local branch_pattern=$1
+  case "$branch_pattern" in
+    *'*'* | *'?'* | *'['* | */)
+      return 1
+      ;;
+  esac
+}
+
+onbranch_condition_matches_branch() {
+  local branch_pattern=$1
+  local branch_name=$2
   if [[ "$branch_pattern" == */ ]]; then
     branch_pattern="${branch_pattern}**"
   fi
   [[ "$branch_name" == $branch_pattern ]]
+}
+
+onbranch_condition_prefix() {
+  local branch_pattern=$1
+  local branch_prefix
+  if [[ "$branch_pattern" == */ ]]; then
+    branch_pattern="${branch_pattern}**"
+  fi
+  case "$branch_pattern" in
+    *'/**')
+      branch_prefix=${branch_pattern%'**'}
+      if onbranch_condition_is_exact "${branch_prefix%/}"; then
+        printf '%s\n' "$branch_prefix"
+        return 0
+      fi
+      ;;
+  esac
+  return 1
+}
+
+onbranch_conditions_overlap() {
+  local outer_pattern=$1
+  local nested_pattern=$2
+  local outer_prefix
+  local nested_prefix
+  if onbranch_condition_is_exact "$outer_pattern"; then
+    onbranch_condition_matches_branch "$nested_pattern" "$outer_pattern"
+    return
+  fi
+  if onbranch_condition_is_exact "$nested_pattern"; then
+    onbranch_condition_matches_branch "$outer_pattern" "$nested_pattern"
+    return
+  fi
+  outer_prefix=$(onbranch_condition_prefix "$outer_pattern" || true)
+  nested_prefix=$(onbranch_condition_prefix "$nested_pattern" || true)
+  if [[ -n "$outer_prefix" && -n "$nested_prefix" ]]; then
+    if [[ "$outer_prefix" == "$nested_prefix"* || \
+      "$nested_prefix" == "$outer_prefix"* ]]; then
+      return 0
+    fi
+    return 1
+  fi
+  return 0
 }
 
 conditioned_include_is_active() {
@@ -164,6 +223,7 @@ validate_nested_conditioned_config() {
   local include_path
   local nested_path
   local nested_branch_pattern
+  local nested_branch_context
   for seen_path in "${conditioned_config_files[@]}"; do
     if [[ "$seen_path" == "$seen_key" ]]; then
       return 0
@@ -192,10 +252,13 @@ validate_nested_conditioned_config() {
       includeif.onbranch:*.path)
         nested_branch_pattern=${config_key#includeif.onbranch:}
         nested_branch_pattern=${nested_branch_pattern%.path}
-        if [[ -z "$branch_context" ]] || \
-          branch_matches_onbranch_condition "$branch_context" "$nested_branch_pattern"; then
+        if onbranch_conditions_overlap "$branch_context" "$nested_branch_pattern"; then
+          nested_branch_context=$branch_context
+          if onbranch_condition_is_exact "$nested_branch_pattern"; then
+            nested_branch_context=$nested_branch_pattern
+          fi
           validate_nested_conditioned_config \
-            "$worktree_path" "$nested_path" "$branch_context" || return 1
+            "$worktree_path" "$nested_path" "$nested_branch_context" || return 1
         fi
         ;;
       includeif.*.path)
@@ -246,14 +309,7 @@ validate_branch_conditioned_config() {
     config_path=$(resolve_include_path "$worktree_path" "$origin" "$include_path") || return 1
     branch_pattern=${config_key#includeif.onbranch:}
     branch_pattern=${branch_pattern%.path}
-    case "$branch_pattern" in
-      *'*'* | *'?'* | *'['* | */)
-        branch_context=''
-        ;;
-      *)
-        branch_context=$branch_pattern
-        ;;
-    esac
+    branch_context=$branch_pattern
     validate_conditioned_config_file \
       "$worktree_path" "$config_path" "$branch_context" || return 1
   done < <(git -C "$worktree_path" config --null --show-origin --get-regexp '^includeif\.onbranch:.*\.path$' 2>/dev/null || true)
@@ -385,6 +441,8 @@ if [[ "$mode" == "apply" ]]; then
   done < <(git config --local --name-only --get-regexp '^branch\..*\.pushremote$' 2>/dev/null || true)
   git config --local --replace-all remote.origin.fetch \
     '+refs/heads/*:refs/remotes/origin/*'
+  git config --local --replace-all remote.upstream.fetch \
+    '+refs/heads/*:refs/remotes/upstream/*'
   git config --local --replace-all remote.upstream.pushurl DISABLED
   git config --local --replace-all remote.pushDefault origin
   git config --local --replace-all push.default simple
@@ -458,6 +516,7 @@ check_effective_scalar_config() {
 
 required_multi_configs=(
   'remote.origin.fetch +refs/heads/*:refs/remotes/origin/*'
+  'remote.upstream.fetch +refs/heads/*:refs/remotes/upstream/*'
   'remote.upstream.pushurl DISABLED'
 )
 required_scalar_configs=(
