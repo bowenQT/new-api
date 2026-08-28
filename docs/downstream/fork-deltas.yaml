@@ -50,8 +50,31 @@ entries:
     introduced_commit: f59e9d3545a3ea0a64542b7dbfd3f5b7779f9799
     purpose: Read-only upstream price catalog (PriceSource/PriceSnapshot/PriceSyncRun models, adapter registry with the Vercel AI Gateway cost adapter, manual preview/sync, current-price query) per docs/downstream/upstream-price-catalog-spec.md Phase 1, without touching any sale-pricing configuration.
     paths:
+      - controller/upstream_price.go
+      - controller/upstream_price_blackbox_test.go
+      - dto/upstream_price.go
       - model/main.go
+      - model/upstream_price.go
+      - model/upstream_price_migration_test.go
+      - model/upstream_price_test.go
       - router/api-router.go
+      - service/upstreamprice/adapter.go
+      - service/upstreamprice/adapters/billing_isolation_test.go
+      - service/upstreamprice/adapters/review_fixes_test.go
+      - service/upstreamprice/adapters/sync_engine_test.go
+      - service/upstreamprice/adapters/testdata/vercel_models_sample.json
+      - service/upstreamprice/adapters/vercel_gateway.go
+      - service/upstreamprice/adapters/vercel_gateway_test.go
+      - service/upstreamprice/catalog.go
+      - service/upstreamprice/normalize.go
+      - service/upstreamprice/normalize_test.go
+      - service/upstreamprice/registry.go
+      - service/upstreamprice/source.go
+      - service/upstreamprice/sync.go
+      - service/upstreamprice/sync_retry_test.go
+      - service/upstreamprice/sync_token_test.go
+      - service/upstreamprice/validate.go
+      - service/upstreamprice/validate_test.go
     upstream_touchpoints:
       - GORM AutoMigrate registration in model/main.go (migrateDB and migrateDBFast lists)
       - RootAuth API route groups /api/upstream-price-sources and /api/upstream-prices in router/api-router.go
