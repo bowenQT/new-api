@@ -42,7 +42,14 @@ func (upstreamPriceSyncHandler) Interval() time.Duration { return upstreamprice.
 func (upstreamPriceSyncHandler) NewPayload() any { return nil }
 
 func (upstreamPriceSyncHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
-	summary := upstreamprice.RunScheduledSync(ctx, service.NewSystemTaskProgressReporter(task, runnerID))
+	// A pass in which any due source failed — including a run a gate refused
+	// without returning an error — or which hit the overall timeout finishes
+	// the task as failed, with the summary still recorded as its result.
+	summary, err := upstreamprice.RunScheduledSync(ctx, service.NewSystemTaskProgressReporter(task, runnerID))
+	if err != nil {
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, summary, err)
+		return
+	}
 	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, summary, nil)
 }
 

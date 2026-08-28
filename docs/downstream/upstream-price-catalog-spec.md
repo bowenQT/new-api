@@ -473,6 +473,7 @@ Phase 2 实施口径：
 - 唤醒周期 15 分钟，远短于来源级 6 小时下限，使来源贴近自身间隔执行。
 - 6 小时下限在写入校验（启用调度时 `schedule_interval_seconds` 必须 ≥ 21600）与到期筛选两处同时强制。
 - 到期基准取最近一次尝试（成功或失败）时间，失败来源退避一个完整间隔，不在下次唤醒重试。
+- 调度结果分类以 run status 为准，不以「是否返回 error」为准：`failed` run（零有效观测、覆盖率门禁拒绝）不返回 error 但没有提交任何观测，一律计入 `failed`；`partial` 已提交有效观测，计入 `succeeded` 并在 summary 中单列 `partial` 计数。任一来源 `failed` 或整次任务超时（`timed_out=true`），`upstream_price_sync` 的 SystemTask 一律收尾为 `failed`，summary 仍作为任务 result 记录；orphan 跳过不算失败。
 - 单来源超时 3 分钟，整次任务超时 30 分钟；orphan 来源拒绝执行，Preview 仍可用于诊断。
 - 无人工 Preview，但复用同一条 commit 路径：同样的抓取、归一化、验证、覆盖率与变化门禁，以及同一个 CAS 事务。
 

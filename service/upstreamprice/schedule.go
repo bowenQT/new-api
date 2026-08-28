@@ -39,12 +39,21 @@ const (
 )
 
 // ScheduledSyncSummary is the task result recorded on the system task row.
+//
+// Succeeded counts the sources whose run actually committed observations, so a
+// partial run — valid observations were written, some models were unsupported,
+// rejected, or missing — is counted there and additionally reported in Partial.
+// Failed counts every source whose run did not commit anything, whether it
+// errored outright or was refused by a gate (zero valid observations, coverage
+// drop), because such a run advances nothing (spec §8.4).
 type ScheduledSyncSummary struct {
-	Due       int `json:"due"`
-	Executed  int `json:"executed"`
-	Succeeded int `json:"succeeded"`
-	Failed    int `json:"failed"`
-	Skipped   int `json:"skipped"`
+	Due       int  `json:"due"`
+	Executed  int  `json:"executed"`
+	Succeeded int  `json:"succeeded"`
+	Partial   int  `json:"partial"`
+	Failed    int  `json:"failed"`
+	Skipped   int  `json:"skipped"`
+	TimedOut  bool `json:"timed_out"`
 }
 
 // ScheduledSyncEnabled reports whether the background sync should run at all:
@@ -88,7 +97,12 @@ func scheduledSourceDue(source *model.PriceSource, now int64) bool {
 // RunScheduledSync executes one scheduled pass: due sources are synced one at
 // a time under a per-source and an overall timeout, orphaned sources are
 // refused, and catalog alerts are logged for whatever actually changed.
-func RunScheduledSync(ctx context.Context, progress func(processed, total int)) ScheduledSyncSummary {
+//
+// The returned error is the pass's outcome for the system task row: any source
+// that failed — including a run the coverage or zero-observation gate refused —
+// and the overall timeout both make the pass a failure, so a refused sync is
+// never reported as a successful task (spec §8.4).
+func RunScheduledSync(ctx context.Context, progress func(processed, total int)) (ScheduledSyncSummary, error) {
 	summary := ScheduledSyncSummary{}
 	ctx, cancel := context.WithTimeout(ctx, scheduledTotalTimeout)
 	defer cancel()
@@ -96,7 +110,7 @@ func RunScheduledSync(ctx context.Context, progress func(processed, total int)) 
 	sources, err := model.GetAllPriceSources()
 	if err != nil {
 		common.SysError(fmt.Sprintf("upstream price scheduled sync could not list sources: %v", err))
-		return summary
+		return summary, fmt.Errorf("upstream price scheduled sync could not list sources: %w", err)
 	}
 	now := common.GetTimestamp()
 	due := make([]*model.PriceSource, 0, len(sources))
@@ -113,6 +127,7 @@ func RunScheduledSync(ctx context.Context, progress func(processed, total int)) 
 	for index, source := range due {
 		if ctx.Err() != nil {
 			summary.Skipped += len(due) - index
+			summary.TimedOut = true
 			logger.LogWarn(ctx, "upstream price scheduled sync stopped: overall timeout reached")
 			break
 		}
@@ -134,11 +149,21 @@ func RunScheduledSync(ctx context.Context, progress func(processed, total int)) 
 		sourceCtx, cancelSource := context.WithTimeout(ctx, scheduledSourceTimeout)
 		result, err := SyncPriceSourceWithoutPreview(sourceCtx, source)
 		cancelSource()
-		if err != nil {
+		switch {
+		case err != nil:
 			summary.Failed++
 			logger.LogWarn(ctx, fmt.Sprintf("upstream price scheduled sync failed for source %d (%q): %v", source.Id, source.Name, err))
-		} else {
+		case result.Status == model.PriceSyncRunStatusFailed:
+			// A refused commit returns no error but advances nothing: the run
+			// had zero valid observations or the coverage gate rejected it.
+			summary.Failed++
+			logger.LogWarn(ctx, fmt.Sprintf("upstream price scheduled sync refused run %d for source %d (%q): valid=%d error=%q",
+				result.RunId, source.Id, source.Name, result.ValidCount, result.ErrorSummary))
+		default:
 			summary.Succeeded++
+			if result.Status == model.PriceSyncRunStatusPartial {
+				summary.Partial++
+			}
 			logger.LogInfo(ctx, fmt.Sprintf("upstream price scheduled sync committed run %d for source %d (%q): status=%s valid=%d new=%d",
 				result.RunId, source.Id, source.Name, result.Status, result.ValidCount, result.NewSnapshotCount))
 		}
@@ -156,7 +181,11 @@ func RunScheduledSync(ctx context.Context, progress func(processed, total int)) 
 	if summary.Executed > 0 {
 		logCostInversionAlerts(ctx)
 	}
-	return summary
+	if summary.Failed > 0 || summary.TimedOut {
+		return summary, fmt.Errorf("upstream price scheduled sync incomplete: %d of %d due sources failed, %d skipped, timed_out=%t",
+			summary.Failed, summary.Due, summary.Skipped, summary.TimedOut)
+	}
+	return summary, nil
 }
 
 // logCostInversionAlerts runs one default-group comparison over the catalog
