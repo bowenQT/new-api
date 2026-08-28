@@ -154,7 +154,7 @@ run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --apply >/dev/nul
 
 git -C "$fixture_repo" config --local extensions.worktreeConfig true
 git -C "$fixture_repo" config --worktree push.default current
-expect_failure "effective push.default expected exactly one value 'simple'" \
+expect_failure "effective push.default expected 'simple'" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --apply
 git -C "$fixture_repo" config --worktree --unset push.default
 git -C "$fixture_repo" config --worktree branch.main.merge refs/heads/downstream/main
@@ -174,7 +174,7 @@ expect_failure "effective upstream push URL must be exactly DISABLED in worktree
   run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
 git -C "$linked_worktree" config --worktree --unset url.https://evil.example/.insteadOf
 git -C "$linked_worktree" config --worktree push.default current
-expect_failure "effective push.default expected exactly one value 'simple'" \
+expect_failure "effective push.default expected 'simple'" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
 git -C "$linked_worktree" config --worktree --unset push.default
 git -C "$linked_worktree" config --worktree branch.main.merge refs/heads/downstream/main
@@ -183,7 +183,19 @@ expect_failure "effective branch.main.merge expected exactly one value 'refs/hea
 git -C "$linked_worktree" config --worktree --unset branch.main.merge
 run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check >/dev/null
 
+global_config="$fixture_root/global-config"
+git config --file "$global_config" push.default simple
+GIT_CONFIG_GLOBAL="$global_config" run_in_repo "$fixture_repo" \
+  scripts/agent-runtime/bootstrap.sh --check >/dev/null
+
 git -C "$fixture_repo" switch --quiet downstream/main
+main_branch_config="$fixture_root/main-branch-config"
+git config --file "$main_branch_config" branch.main.remote upstream
+git config --file "$main_branch_config" branch.main.merge refs/heads/downstream/main
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$main_branch_config"
+expect_failure "branch-conditioned safety override" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
 expect_failure "edit mode requires a symbolic topic branch" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/preflight.sh --mode edit
 

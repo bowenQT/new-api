@@ -78,6 +78,99 @@ matches_github_repo() {
   return 1
 }
 
+protected_config_regex='^(remote\.upstream\.pushurl|remote\.pushdefault|push\.default|pull\.ff|fetch\.prune|rebase\.autostash|merge\.autostash|merge\.conflictstyle|rerere\.enabled|rerere\.autoupdate|branch\.main\.(remote|merge)|branch\.downstream/main\.(remote|merge))$'
+conditioned_config_files=()
+
+resolve_include_path() {
+  local worktree_path=$1
+  local origin=$2
+  local include_path=$3
+  local origin_path
+  local origin_dir
+  case "$origin" in
+    file:*)
+      origin_path=${origin#file:}
+      ;;
+    *)
+      echo "ERROR: cannot validate branch-conditioned include from $origin" >&2
+      return 1
+      ;;
+  esac
+  case "$origin_path" in
+    /*)
+      ;;
+    *)
+      origin_path="$worktree_path/$origin_path"
+      ;;
+  esac
+  origin_dir=$(cd "$(dirname "$origin_path")" 2>/dev/null && pwd -P) || {
+    echo "ERROR: cannot resolve branch-conditioned include origin: $origin_path" >&2
+    return 1
+  }
+  case "$include_path" in
+    /*)
+      printf '%s\n' "$include_path"
+      ;;
+    '~/'*)
+      printf '%s/%s\n' "${HOME}" "${include_path#~/}"
+      ;;
+    '%(home)/'*)
+      printf '%s/%s\n' "${HOME}" "${include_path#%(home)/}"
+      ;;
+    '%('* | '~'*)
+      echo "ERROR: cannot safely resolve branch-conditioned include path: $include_path" >&2
+      return 1
+      ;;
+    *)
+      printf '%s/%s\n' "$origin_dir" "$include_path"
+      ;;
+  esac
+}
+
+validate_conditioned_config_file() {
+  local worktree_path=$1
+  local config_path=$2
+  local seen_path
+  local protected_values
+  local origin
+  local config_entry
+  local include_path
+  local nested_path
+  for seen_path in "${conditioned_config_files[@]}"; do
+    if [[ "$seen_path" == "$config_path" ]]; then
+      return 0
+    fi
+  done
+  conditioned_config_files+=("$config_path")
+  if [[ ! -f "$config_path" ]]; then
+    echo "ERROR: branch-conditioned include is unavailable: $config_path" >&2
+    return 1
+  fi
+  protected_values=$(git config --file "$config_path" --get-regexp "$protected_config_regex" 2>/dev/null || true)
+  if [[ -n "$protected_values" ]]; then
+    echo "ERROR: branch-conditioned safety override in $config_path: $protected_values" >&2
+    return 1
+  fi
+  while IFS= read -r -d '' origin && IFS= read -r -d '' config_entry; do
+    include_path=${config_entry#*$'\n'}
+    nested_path=$(resolve_include_path "$worktree_path" "$origin" "$include_path") || return 1
+    validate_conditioned_config_file "$worktree_path" "$nested_path" || return 1
+  done < <(git config --file "$config_path" --null --show-origin --get-regexp '^(include\.path|includeif\..*\.path)$' 2>/dev/null || true)
+}
+
+validate_branch_conditioned_config() {
+  local worktree_path=$1
+  local origin
+  local config_entry
+  local include_path
+  local config_path
+  while IFS= read -r -d '' origin && IFS= read -r -d '' config_entry; do
+    include_path=${config_entry#*$'\n'}
+    config_path=$(resolve_include_path "$worktree_path" "$origin" "$include_path") || return 1
+    validate_conditioned_config_file "$worktree_path" "$config_path" || return 1
+  done < <(git -C "$worktree_path" config --null --show-origin --get-regexp '^includeif\.onbranch:.*\.path$' 2>/dev/null || true)
+}
+
 validate_remote_urls() {
   local remote_name=$1
   local repository=$2
@@ -145,6 +238,7 @@ validate_effective_upstream_push() {
 }
 
 for worktree_path in "${worktree_paths[@]}"; do
+  validate_branch_conditioned_config "$worktree_path"
   validate_effective_urls "$worktree_path" origin bowenQT/new-api fetch
   validate_effective_urls "$worktree_path" origin bowenQT/new-api push
   validate_effective_urls "$worktree_path" upstream QuantumNous/new-api fetch
@@ -212,7 +306,7 @@ check_local_config() {
   printf '%s=%s\n' "$key" "$actual"
 }
 
-check_effective_config() {
+check_effective_multi_config() {
   local worktree_path=$1
   local key=$2
   local expected=$3
@@ -227,8 +321,23 @@ check_effective_config() {
   printf 'worktree.%s.effective.%s=%s\n' "$worktree_path" "$key" "$actual"
 }
 
-required_configs=(
+check_effective_scalar_config() {
+  local worktree_path=$1
+  local key=$2
+  local expected=$3
+  local actual
+  actual=$(git -C "$worktree_path" config --get "$key" 2>/dev/null || true)
+  if [[ "$actual" != "$expected" ]]; then
+    echo "ERROR: worktree $worktree_path effective $key expected '$expected', found '${actual:-<unset>}'" >&2
+    return 1
+  fi
+  printf 'worktree.%s.effective.%s=%s\n' "$worktree_path" "$key" "$actual"
+}
+
+required_multi_configs=(
   'remote.upstream.pushurl DISABLED'
+)
+required_scalar_configs=(
   'remote.pushDefault origin'
   'push.default simple'
   'pull.ff only'
@@ -239,11 +348,18 @@ required_configs=(
   'rerere.enabled true'
   'rerere.autoupdate false'
 )
-for required_config in "${required_configs[@]}"; do
+for required_config in "${required_multi_configs[@]}"; do
   read -r key expected <<< "$required_config"
   check_local_config "$key" "$expected"
   for worktree_path in "${worktree_paths[@]}"; do
-    check_effective_config "$worktree_path" "$key" "$expected"
+    check_effective_multi_config "$worktree_path" "$key" "$expected"
+  done
+done
+for required_config in "${required_scalar_configs[@]}"; do
+  read -r key expected <<< "$required_config"
+  check_local_config "$key" "$expected"
+  for worktree_path in "${worktree_paths[@]}"; do
+    check_effective_scalar_config "$worktree_path" "$key" "$expected"
   done
 done
 
@@ -251,8 +367,8 @@ if git show-ref --verify --quiet refs/heads/main; then
   check_local_config branch.main.remote origin
   check_local_config branch.main.merge refs/heads/main
   for worktree_path in "${worktree_paths[@]}"; do
-    check_effective_config "$worktree_path" branch.main.remote origin
-    check_effective_config "$worktree_path" branch.main.merge refs/heads/main
+    check_effective_scalar_config "$worktree_path" branch.main.remote origin
+    check_effective_multi_config "$worktree_path" branch.main.merge refs/heads/main
   done
 fi
 
@@ -261,8 +377,8 @@ if git show-ref --verify --quiet refs/heads/downstream/main &&
   check_local_config branch.downstream/main.remote origin
   check_local_config branch.downstream/main.merge refs/heads/downstream/main
   for worktree_path in "${worktree_paths[@]}"; do
-    check_effective_config "$worktree_path" branch.downstream/main.remote origin
-    check_effective_config "$worktree_path" branch.downstream/main.merge refs/heads/downstream/main
+    check_effective_scalar_config "$worktree_path" branch.downstream/main.remote origin
+    check_effective_multi_config "$worktree_path" branch.downstream/main.merge refs/heads/downstream/main
   done
 fi
 
