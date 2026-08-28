@@ -231,6 +231,20 @@ func SetApiRouter(router *gin.Engine) {
 			ratioSyncRoute.GET("/channels", controller.GetSyncableChannels)
 			ratioSyncRoute.POST("/fetch", controller.FetchUpstreamRatios)
 		}
+		upstreamPriceSourceRoute := apiRouter.Group("/upstream-price-sources")
+		upstreamPriceSourceRoute.Use(middleware.RootAuth())
+		{
+			upstreamPriceSourceRoute.GET("", controller.GetUpstreamPriceSources)
+			upstreamPriceSourceRoute.POST("", controller.CreateUpstreamPriceSource)
+			upstreamPriceSourceRoute.PUT("/:id", controller.UpdateUpstreamPriceSource)
+			upstreamPriceSourceRoute.POST("/:id/preview", controller.PreviewUpstreamPriceSource)
+			upstreamPriceSourceRoute.POST("/:id/sync", controller.SyncUpstreamPriceSource)
+		}
+		upstreamPriceRoute := apiRouter.Group("/upstream-prices")
+		upstreamPriceRoute.Use(middleware.RootAuth())
+		{
+			upstreamPriceRoute.GET("/current", controller.GetCurrentUpstreamPrices)
+		}
 		registerChannelRoutes(apiRouter)
 		registerAuthzRoutes(apiRouter)
 		tokenRoute := apiRouter.Group("/token")
