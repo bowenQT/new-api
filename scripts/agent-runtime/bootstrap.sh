@@ -154,20 +154,23 @@ onbranch_condition_matches_branch() {
 
 onbranch_condition_prefix() {
   local branch_pattern=$1
-  local branch_prefix
+  local branch_prefix=''
+  local branch_character
+  local branch_index=0
   if [[ "$branch_pattern" == */ ]]; then
     branch_pattern="${branch_pattern}**"
   fi
-  case "$branch_pattern" in
-    *'/**')
-      branch_prefix=${branch_pattern%'**'}
-      if onbranch_condition_is_exact "${branch_prefix%/}"; then
-        printf '%s\n' "$branch_prefix"
-        return 0
-      fi
-      ;;
-  esac
-  return 1
+  while (( branch_index < ${#branch_pattern} )); do
+    branch_character=${branch_pattern:$branch_index:1}
+    case "$branch_character" in
+      '*' | '?' | '[')
+        break
+        ;;
+    esac
+    branch_prefix+=$branch_character
+    ((branch_index += 1))
+  done
+  printf '%s\n' "$branch_prefix"
 }
 
 onbranch_conditions_overlap() {

@@ -302,6 +302,14 @@ git -C "$fixture_repo" config --local includeIf.onbranch:release/.path \
   "$nested_onbranch_outer_config"
 run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check >/dev/null
 git -C "$fixture_repo" config --local --unset includeIf.onbranch:release/.path
+git config --file "$nested_onbranch_outer_config" --unset-all \
+  includeIf.onbranch:main/.path
+git config --file "$nested_onbranch_outer_config" 'includeIf.onbranch:main-*.path' \
+  "$nested_onbranch_inner_config"
+git -C "$fixture_repo" config --local 'includeIf.onbranch:release-*.path' \
+  "$nested_onbranch_outer_config"
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check >/dev/null
+git -C "$fixture_repo" config --local --unset 'includeIf.onbranch:release-*.path'
 nested_outer_config="$fixture_root/nested-outer-config"
 nested_inactive_config="$fixture_root/nested-inactive-config"
 git config --file "$nested_inactive_config" pull.ff false
