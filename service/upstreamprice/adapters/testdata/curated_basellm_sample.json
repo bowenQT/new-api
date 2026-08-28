@@ -1,0 +1,18 @@
+{
+  "minimax": {
+    "id": "minimax",
+    "name": "MiniMax",
+    "iconURL": "https://example.invalid/minimax.svg",
+    "models": {
+      "MiniMax-M2": {
+        "id": "MiniMax-M2",
+        "name": "MiniMax M2",
+        "cost": {
+          "input": 0.3,
+          "output": 1.2,
+          "cache_read": 0.06
+        }
+      }
+    }
+  }
+}

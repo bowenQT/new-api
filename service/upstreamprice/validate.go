@@ -25,6 +25,10 @@ const (
 	WarningExprValidationFailed  = "expr_validation_failed"
 	WarningDuplicateModel        = "duplicate_model"
 	WarningFieldTooLong          = "field_too_long"
+	// WarningTieredPricingUnsupported marks a source model whose tiered
+	// pricing changes the very dimensions Phase 2 normalizes, so recording
+	// only the base tier would understate the price.
+	WarningTieredPricingUnsupported = "tiered_pricing_unsupported"
 )
 
 // Structural length bounds enforced at validation time (defense in depth on
