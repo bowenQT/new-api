@@ -58,15 +58,16 @@ const (
 
 // Entry status labels (spec §11.2).
 const (
-	CompareStatusStale             = "stale"
-	CompareStatusMissing           = "missing"
-	CompareStatusOrphaned          = "orphaned"
-	CompareStatusCanonicalConflict = "canonical_conflict"
-	CompareStatusVariesByProvider  = "varies_by_provider"
-	CompareStatusCostInverted      = "cost_inverted"
-	CompareStatusNoCatalogPrice    = "no_catalog_price"
-	CompareStatusSaleNotProjected  = "sale_not_projectable"
-	CompareStatusCostNotProjected  = "cost_not_projectable"
+	CompareStatusStale               = "stale"
+	CompareStatusMissing             = "missing"
+	CompareStatusOrphaned            = "orphaned"
+	CompareStatusCanonicalConflict   = "canonical_conflict"
+	CompareStatusVariesByProvider    = "varies_by_provider"
+	CompareStatusCostInverted        = "cost_inverted"
+	CompareStatusSourceConfigChanged = "source_config_changed"
+	CompareStatusNoCatalogPrice      = "no_catalog_price"
+	CompareStatusSaleNotProjected    = "sale_not_projectable"
+	CompareStatusCostNotProjected    = "cost_not_projectable"
 )
 
 // RequestRuleProjectionNote is shown for tiered expressions whose
@@ -306,6 +307,9 @@ func buildCompareEntry(modelName string, catalogEntries []dto.UpstreamCurrentPri
 		if price.CanonicalConflict {
 			statuses[CompareStatusCanonicalConflict] = true
 		}
+		if price.SourceConfigChanged {
+			statuses[CompareStatusSourceConfigChanged] = true
+		}
 		if price.Status == CatalogStatusMissing {
 			statuses[CompareStatusMissing] = true
 		}
@@ -377,29 +381,33 @@ func sortedStatusList(statuses map[string]bool) []string {
 // projectCatalogEntry converts one catalog row into a projected USD amount
 // under the comparison's usage vector. Only rows that are current or stale
 // observations carry a margin-usable amount: a model the source stopped
-// returning must not be asserted as a current cost.
+// returning must not be asserted as a current cost, and neither must an
+// observation whose source configuration changed after the run that produced
+// it (spec §9.2) — a cost fetched for one channel would otherwise be presented
+// as the confirmed cost of whichever channel the source now names.
 func projectCatalogEntry(catalogEntry dto.UpstreamCurrentPriceEntry, params billingexpr.TokenParams) dto.UpstreamPriceCompareSourcePrice {
 	price := dto.UpstreamPriceCompareSourcePrice{
-		SourceId:          catalogEntry.SourceId,
-		SourceName:        catalogEntry.SourceName,
-		Role:              catalogEntry.Role,
-		Scope:             catalogEntry.Scope,
-		ChannelId:         catalogEntry.ChannelId,
-		SourceModelName:   catalogEntry.SourceModelName,
-		FormulaKind:       catalogEntry.FormulaKind,
-		Status:            catalogEntry.Status,
-		WarningCode:       catalogEntry.WarningCode,
-		Stale:             catalogEntry.Stale,
-		Orphaned:          catalogEntry.Orphaned,
-		VariesByProvider:  catalogEntry.VariesByProvider,
-		CanonicalConflict: catalogEntry.CanonicalConflict,
-		SnapshotId:        catalogEntry.SnapshotId,
-		RunId:             catalogEntry.RunId,
-		RunFinishedAt:     catalogEntry.RunFinishedAt,
-		LastSeenAt:        catalogEntry.LastSeenAt,
-		FetchedAt:         catalogEntry.FetchedAt,
-		EffectiveAt:       catalogEntry.EffectiveAt,
-		Projection:        ProjectionNotConfigured,
+		SourceId:            catalogEntry.SourceId,
+		SourceName:          catalogEntry.SourceName,
+		Role:                catalogEntry.Role,
+		Scope:               catalogEntry.Scope,
+		ChannelId:           catalogEntry.ChannelId,
+		SourceModelName:     catalogEntry.SourceModelName,
+		FormulaKind:         catalogEntry.FormulaKind,
+		Status:              catalogEntry.Status,
+		WarningCode:         catalogEntry.WarningCode,
+		Stale:               catalogEntry.Stale,
+		Orphaned:            catalogEntry.Orphaned,
+		VariesByProvider:    catalogEntry.VariesByProvider,
+		CanonicalConflict:   catalogEntry.CanonicalConflict,
+		SourceConfigChanged: catalogEntry.SourceConfigChanged,
+		SnapshotId:          catalogEntry.SnapshotId,
+		RunId:               catalogEntry.RunId,
+		RunFinishedAt:       catalogEntry.RunFinishedAt,
+		LastSeenAt:          catalogEntry.LastSeenAt,
+		FetchedAt:           catalogEntry.FetchedAt,
+		EffectiveAt:         catalogEntry.EffectiveAt,
+		Projection:          ProjectionNotConfigured,
 	}
 	if catalogEntry.VariesByProvider {
 		price.ProjectionNote = VariesByProviderNote
@@ -420,7 +428,7 @@ func projectCatalogEntry(catalogEntry dto.UpstreamCurrentPriceEntry, params bill
 	}
 	price.Projection = ProjectionOK
 	price.AmountUSD = &amount
-	price.UsableForMargin = catalogEntry.Status == CatalogStatusCurrent
+	price.UsableForMargin = catalogEntry.Status == CatalogStatusCurrent && !catalogEntry.SourceConfigChanged
 	return price
 }
 

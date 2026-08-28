@@ -886,6 +886,25 @@ func sourceConfigDigest(config SourceConfig) string {
 	return hex.EncodeToString(digest[:])
 }
 
+// priceSourceConfigChanged reports whether the source configuration a run
+// actually executed under still matches the source's current configuration
+// (spec §7.3, §9.2). Only the price-semantic fields participate, because
+// sourceConfigDigest covers adapter_key, role, scope, channel_id, and the
+// non-secret settings and nothing else: toggling enabled, schedule_enabled, or
+// schedule_interval_seconds does not invalidate an observation, while pointing
+// the source at a different channel or adapter does.
+//
+// A run without a digest is treated as changed. The catalog and comparison
+// paths fail closed on the answer — a cost whose configuration moved is never
+// reported as a confirmed current cost — so "unknown" must not read as "still
+// valid".
+func priceSourceConfigChanged(config SourceConfig, run *model.PriceSyncRun) bool {
+	if run == nil {
+		return true
+	}
+	return run.SourceConfigDigest != sourceConfigDigest(config)
+}
+
 // checkSupplierChannelForCommit is the pre-transaction fast fail for commit:
 // a supplier_cost source must reference an existing, enabled channel. The
 // same check is repeated authoritatively inside the commit transaction.

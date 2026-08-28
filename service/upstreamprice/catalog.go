@@ -91,6 +91,10 @@ func currentEntriesForSource(source *model.PriceSource, now int64) ([]dto.Upstre
 	if run.FinishedAt != nil {
 		stale = now-*run.FinishedAt > staleThresholdSeconds(source, config.Settings)
 	}
+	// The run's observations describe the configuration it ran under; if the
+	// source has since been pointed at another channel, adapter, role, scope,
+	// or settings, they are labeled and stop counting as confirmed costs.
+	configChanged := priceSourceConfigChanged(config, run)
 	items, err := model.GetPriceSyncRunItems(run.Id)
 	if err != nil {
 		return nil, err
@@ -115,17 +119,18 @@ func currentEntriesForSource(source *model.PriceSource, now int64) ([]dto.Upstre
 	canonicalCounts := make(map[string]int)
 	for _, item := range items {
 		entry := dto.UpstreamCurrentPriceEntry{
-			SourceId:        source.Id,
-			SourceName:      source.Name,
-			Role:            source.Role,
-			Scope:           source.Scope,
-			ChannelId:       source.ChannelId,
-			SourceModelName: item.SourceModelName,
-			WarningCode:     item.WarningCode,
-			RunId:           run.Id,
-			RunFinishedAt:   run.FinishedAt,
-			Stale:           stale,
-			Orphaned:        orphaned,
+			SourceId:            source.Id,
+			SourceName:          source.Name,
+			Role:                source.Role,
+			Scope:               source.Scope,
+			ChannelId:           source.ChannelId,
+			SourceModelName:     item.SourceModelName,
+			WarningCode:         item.WarningCode,
+			RunId:               run.Id,
+			RunFinishedAt:       run.FinishedAt,
+			Stale:               stale,
+			Orphaned:            orphaned,
+			SourceConfigChanged: configChanged,
 		}
 		switch item.Status {
 		case model.PriceSyncItemStatusValid:

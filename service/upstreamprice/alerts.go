@@ -19,6 +19,11 @@ const (
 	AlertSourceStale               = "source_stale"
 	AlertCoverageDrop              = "coverage_drop"
 	AlertCostInversion             = "cost_inversion"
+	// AlertSourceConfigChanged fires while a source's last successful run
+	// executed under a different configuration than the source carries now.
+	// Its prices stop counting as confirmed costs until the next sync, so the
+	// admin must be told why they dropped out of the margin.
+	AlertSourceConfigChanged = "source_config_changed"
 )
 
 // ConsecutiveFailureAlertThreshold is the number of trailing failed runs that
@@ -60,6 +65,14 @@ func EvaluateSourceAlerts(sources []*model.PriceSource, now int64) ([]dto.Upstre
 		successfulRuns, err := model.GetRecentSuccessfulPriceSyncRuns(source.Id, 2)
 		if err != nil {
 			return nil, err
+		}
+		if len(successfulRuns) > 0 && priceSourceConfigChanged(config, successfulRuns[0]) {
+			alerts = append(alerts, dto.UpstreamPriceAlert{
+				Code:       AlertSourceConfigChanged,
+				SourceId:   source.Id,
+				SourceName: source.Name,
+				Detail:     fmt.Sprintf("source configuration changed after run %d; its prices are not confirmed until the next successful sync", successfulRuns[0].Id),
+			})
 		}
 		if len(successfulRuns) > 0 && PriceRole(source.Role) == RoleSupplierCost {
 			latest := successfulRuns[0]

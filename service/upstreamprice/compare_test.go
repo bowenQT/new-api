@@ -96,13 +96,19 @@ func seedCatalogSnapshot(t *testing.T, db *gorm.DB, sourceName string, role Pric
 	}
 	require.NoError(t, model.InsertPriceSource(source))
 
+	// The run records the configuration it ran under, exactly as the commit
+	// path does; the catalog compares it against the source's current
+	// configuration.
+	config, err := SourceConfigFromModel(source)
+	require.NoError(t, err)
 	run := &model.PriceSyncRun{
-		SourceId:   source.Id,
-		Status:     model.PriceSyncRunStatusSucceeded,
-		AdapterKey: "test_adapter",
-		StartedAt:  finishedAt,
-		FinishedAt: &finishedAt,
-		ValidCount: 1,
+		SourceId:           source.Id,
+		Status:             model.PriceSyncRunStatusSucceeded,
+		AdapterKey:         "test_adapter",
+		StartedAt:          finishedAt,
+		FinishedAt:         &finishedAt,
+		ValidCount:         1,
+		SourceConfigDigest: sourceConfigDigest(config),
 	}
 	require.NoError(t, db.Create(run).Error)
 
@@ -350,6 +356,82 @@ func TestCompareUpstreamPricesGroupSelection(t *testing.T) {
 
 func floatPtr(value float64) *float64 {
 	return &value
+}
+
+// TestCompareUpstreamPricesFailsClosedOnChangedSourceConfig is the §9.2 /
+// §10.3 fail-closed contract: a cost observed under one source configuration
+// must not be presented as the confirmed current cost of a source that has
+// since been pointed somewhere else. The stale observation stays visible as
+// evidence but leaves the min/max range, the margin, and cost_confirmed until
+// a run under the current configuration replaces it.
+func TestCompareUpstreamPricesFailsClosedOnChangedSourceConfig(t *testing.T) {
+	db := setupCompareTestDB(t)
+	setupCompareSaleConfig(t)
+	now := common.GetTimestamp()
+
+	original := &model.Channel{Name: "original", Key: "k1", Status: common.ChannelStatusEnabled}
+	require.NoError(t, db.Create(original).Error)
+	replacement := &model.Channel{Name: "replacement", Key: "k2", Status: common.ChannelStatusEnabled}
+	require.NoError(t, db.Create(replacement).Error)
+
+	source := seedCatalogSnapshot(t, db, "cost", RoleSupplierCost, &original.Id, "tiered-model",
+		`tier("base", p * 1 + c * 5)`, FormulaKindTokenExprV1, "", now)
+
+	compareEntry := func() dto.UpstreamPriceCompareEntry {
+		t.Helper()
+		response, err := CompareUpstreamPrices(&dto.UpstreamPriceCompareRequest{Models: []string{"tiered-model"}})
+		require.NoError(t, err)
+		require.Len(t, response.Entries, 1)
+		return response.Entries[0]
+	}
+
+	confirmed := compareEntry()
+	require.Len(t, confirmed.Costs, 1)
+	assert.True(t, confirmed.Costs[0].UsableForMargin)
+	assert.False(t, confirmed.Costs[0].SourceConfigChanged)
+	assert.True(t, confirmed.CostConfirmed)
+	require.NotNil(t, confirmed.MaxCostUSD)
+	assert.InDelta(t, 6, *confirmed.MaxCostUSD, 1e-9)
+	assert.NotContains(t, confirmed.Statuses, CompareStatusSourceConfigChanged)
+
+	// Toggling the scheduling switches is not a price-semantic change.
+	require.NoError(t, db.Model(&model.PriceSource{}).Where("id = ?", source.Id).Updates(map[string]interface{}{
+		"schedule_enabled":          true,
+		"schedule_interval_seconds": MinScheduleIntervalSeconds,
+	}).Error)
+	assert.True(t, compareEntry().CostConfirmed)
+
+	// Repointing the source at another channel is: the observed cost belongs
+	// to the old channel and must not be attributed to the new one.
+	require.NoError(t, db.Model(&model.PriceSource{}).Where("id = ?", source.Id).
+		Update("channel_id", replacement.Id).Error)
+
+	changed := compareEntry()
+	require.Len(t, changed.Costs, 1)
+	assert.True(t, changed.Costs[0].SourceConfigChanged)
+	assert.False(t, changed.Costs[0].UsableForMargin)
+	assert.False(t, changed.CostConfirmed)
+	assert.Nil(t, changed.MinCostUSD)
+	assert.Nil(t, changed.MaxCostUSD)
+	assert.Nil(t, changed.WorstMarginUSD)
+	assert.Nil(t, changed.WorstMarginRate)
+	assert.Contains(t, changed.Statuses, CompareStatusSourceConfigChanged)
+
+	// A successful run under the current configuration restores the cost; the
+	// commit path records the configuration the fetch actually ran under.
+	current, err := model.GetPriceSourceById(source.Id)
+	require.NoError(t, err)
+	config, err := SourceConfigFromModel(current)
+	require.NoError(t, err)
+	require.NoError(t, db.Model(&model.PriceSyncRun{}).Where("source_id = ?", source.Id).
+		Update("source_config_digest", sourceConfigDigest(config)).Error)
+
+	restored := compareEntry()
+	assert.True(t, restored.CostConfirmed)
+	assert.False(t, restored.Costs[0].SourceConfigChanged)
+	require.NotNil(t, restored.MaxCostUSD)
+	assert.InDelta(t, 6, *restored.MaxCostUSD, 1e-9)
+	assert.NotContains(t, restored.Statuses, CompareStatusSourceConfigChanged)
 }
 
 // TestCompareSourcePriceCarriesSnapshotTimestamps pins that a comparison row

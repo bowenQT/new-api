@@ -167,33 +167,39 @@ type UpstreamPriceSyncResponse struct {
 // UpstreamCurrentPriceEntry is one row of the current price catalog with its
 // freshness and integrity labels (spec §8.3, §11.2).
 type UpstreamCurrentPriceEntry struct {
-	SourceId           int               `json:"source_id"`
-	SourceName         string            `json:"source_name"`
-	Role               string            `json:"role"`
-	Scope              string            `json:"scope"`
-	ChannelId          *int              `json:"channel_id,omitempty"`
-	SourceModelName    string            `json:"source_model_name"`
-	CanonicalModelName string            `json:"canonical_model_name,omitempty"`
-	MappingStatus      string            `json:"mapping_status,omitempty"`
-	Provider           string            `json:"provider,omitempty"`
-	Currency           string            `json:"currency,omitempty"`
-	FormulaKind        string            `json:"formula_kind,omitempty"`
-	PriceExpr          string            `json:"price_expr,omitempty"`
-	ExprVersion        string            `json:"expr_version,omitempty"`
-	EffectiveAt        *int64            `json:"effective_at,omitempty"`
-	FetchedAt          int64             `json:"fetched_at,omitempty"`
-	LastSeenAt         int64             `json:"last_seen_at,omitempty"`
-	Fingerprint        string            `json:"fingerprint,omitempty"`
-	SnapshotId         int               `json:"snapshot_id,omitempty"`
-	RunId              int               `json:"run_id"`
-	RunFinishedAt      *int64            `json:"run_finished_at,omitempty"`
-	Status             string            `json:"status"`
-	WarningCode        string            `json:"warning_code,omitempty"`
-	Stale              bool              `json:"stale"`
-	Orphaned           bool              `json:"orphaned"`
-	VariesByProvider   bool              `json:"varies_by_provider"`
-	CanonicalConflict  bool              `json:"canonical_conflict"`
-	Metadata           map[string]string `json:"metadata,omitempty"`
+	SourceId           int    `json:"source_id"`
+	SourceName         string `json:"source_name"`
+	Role               string `json:"role"`
+	Scope              string `json:"scope"`
+	ChannelId          *int   `json:"channel_id,omitempty"`
+	SourceModelName    string `json:"source_model_name"`
+	CanonicalModelName string `json:"canonical_model_name,omitempty"`
+	MappingStatus      string `json:"mapping_status,omitempty"`
+	Provider           string `json:"provider,omitempty"`
+	Currency           string `json:"currency,omitempty"`
+	FormulaKind        string `json:"formula_kind,omitempty"`
+	PriceExpr          string `json:"price_expr,omitempty"`
+	ExprVersion        string `json:"expr_version,omitempty"`
+	EffectiveAt        *int64 `json:"effective_at,omitempty"`
+	FetchedAt          int64  `json:"fetched_at,omitempty"`
+	LastSeenAt         int64  `json:"last_seen_at,omitempty"`
+	Fingerprint        string `json:"fingerprint,omitempty"`
+	SnapshotId         int    `json:"snapshot_id,omitempty"`
+	RunId              int    `json:"run_id"`
+	RunFinishedAt      *int64 `json:"run_finished_at,omitempty"`
+	Status             string `json:"status"`
+	WarningCode        string `json:"warning_code,omitempty"`
+	Stale              bool   `json:"stale"`
+	Orphaned           bool   `json:"orphaned"`
+	VariesByProvider   bool   `json:"varies_by_provider"`
+	CanonicalConflict  bool   `json:"canonical_conflict"`
+	// SourceConfigChanged marks an observation whose run executed under a
+	// different source configuration than the source carries now (a different
+	// channel, adapter, role, scope, or settings). Such a price is still shown
+	// as evidence, but it is not a confirmed current cost until the source
+	// syncs again (spec §7.3, §9.2).
+	SourceConfigChanged bool              `json:"source_config_changed"`
+	Metadata            map[string]string `json:"metadata,omitempty"`
 }
 
 // UpstreamCurrentPriceResponse is the current catalog projection.
@@ -319,10 +325,14 @@ type UpstreamPriceCompareSourcePrice struct {
 	Orphaned          bool     `json:"orphaned"`
 	VariesByProvider  bool     `json:"varies_by_provider"`
 	CanonicalConflict bool     `json:"canonical_conflict"`
-	SnapshotId        int      `json:"snapshot_id,omitempty"`
-	RunId             int      `json:"run_id,omitempty"`
-	RunFinishedAt     *int64   `json:"run_finished_at,omitempty"`
-	LastSeenAt        int64    `json:"last_seen_at,omitempty"`
+	// SourceConfigChanged marks a cost whose run executed under a different
+	// source configuration than the source carries now. It is never usable for
+	// the margin and forces cost_confirmed=false until the source syncs again.
+	SourceConfigChanged bool   `json:"source_config_changed"`
+	SnapshotId          int    `json:"snapshot_id,omitempty"`
+	RunId               int    `json:"run_id,omitempty"`
+	RunFinishedAt       *int64 `json:"run_finished_at,omitempty"`
+	LastSeenAt          int64  `json:"last_seen_at,omitempty"`
 	// FetchedAt and EffectiveAt come from the underlying snapshot so the
 	// comparison view can label observation age and vendor effective date
 	// (spec §8.3) without a second full catalog request.

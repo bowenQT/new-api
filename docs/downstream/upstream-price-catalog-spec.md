@@ -507,6 +507,7 @@ Phase 2 实施口径：
 - 一个模型存在多个可路由渠道时，同时展示最低、最高和最差成本毛利。
 - 没有实际路由命中信息时只能称为“预估毛利”，不能称为真实利润。
 - 参考标价不参与成本毛利；它用于比较销售策略。
+- 配置变更 fail closed：只有 run 记录的实质来源配置与来源当前实质配置一致时，该观察值才算当前已确认成本。实质配置即 `source_config_digest` 覆盖的字段——`adapter_key`、`role`、`scope`、`channel_id` 与非密 `settings`；`enabled`、`schedule_enabled`、`schedule_interval_seconds` 不在其中，开关调度不会使成本失效。digest 不一致（含 run 没有 digest）时该来源成本 fail closed：不进最低/最高成本与毛利，置 `cost_confirmed=false`，并在 `/current` 与 compare 中标注 `source_config_changed`，同时触发 `source_config_changed` 告警；重新同步成功后自动恢复。
 - 汇率、充值折扣、支付手续费、税和退款不在首版计算范围内。
 
 ### 9.3 销售价投影契约
@@ -590,6 +591,7 @@ Phase 2 实施口径：
 - 模型列表为空表示比较目录中全部 canonical 模型，按名称排序上限 500 条，超出时置 `truncated=true`。
 - 可选 `model_filter` 为 canonical 模型名的大小写不敏感子串（最长 255 字符），在 500 条上限**之前**过滤，因此目录超过上限时仍可检索到全部匹配项；`total_models` 为匹配总数，过滤后仍超过上限才置 `truncated=true`。匹配只作用于 canonical 模型名（比较行本身即以 canonical 名聚合），不匹配 `source_model_name`。显式 `models` 列表本身即已收窄集合，此时忽略 `model_filter`，`models` 语义不变。
 - 参与毛利的成本只取本次 `last_success_run` 的观察值（current 与 stale）；`missing`（上游已不再返回）不参与最低/最高与毛利。任一贡献成本为 stale、orphaned、canonical 冲突或 `varies_by_provider` 时置 `cost_confirmed=false`。
+- `source_config_changed`（run 的实质配置与来源当前实质配置不一致，判定口径见 §9.2）比 stale 更强：该成本 `usable_for_margin=false`，完全不进最低/最高与毛利，并置 `cost_confirmed=false`。`/current` 每条目录行同样回带 `source_config_changed`，两处共用同一判定，不允许分叉。
 - `curated_reference` 与 `vendor_list` 价格单独返回，不参与毛利。
 - 每条来源价格回带该观察值快照自身的 `fetched_at` 与 `effective_at`，使 §8.3 要求的时间标注无需再全量调用 `/current`。
 - 响应携带 §9.3 的完整排除项清单与告警列表；所有金额有界，非有限值一律拒绝。
