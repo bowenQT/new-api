@@ -78,7 +78,8 @@ matches_github_repo() {
   return 1
 }
 
-protected_config_regex='^(remote\.(origin|upstream)\.(url|pushurl)|remote\.origin\.(fetch|push)|remote\.pushdefault|url\..*\.(insteadof|pushinsteadof)|push\.default|pull\.ff|fetch\.prune|rebase\.autostash|merge\.autostash|merge\.conflictstyle|rerere\.enabled|rerere\.autoupdate|branch\..*\.pushremote|branch\.main\.(remote|merge)|branch\.downstream/main\.(remote|merge))$'
+protected_config_regex='^(remote\.(origin|upstream)\.(url|pushurl)|remote\.origin\.(fetch|mirror|push)|remote\.pushdefault|url\..*\.(insteadof|pushinsteadof)|push\.default|pull\.ff|fetch\.prune|rebase\.autostash|merge\.autostash|merge\.conflictstyle|rerere\.enabled|rerere\.autoupdate|branch\..*\.pushremote|branch\.main\.(remote|merge)|branch\.downstream/main\.(remote|merge))$'
+conditioned_config_files=()
 
 resolve_include_path() {
   local worktree_path=$1
@@ -126,9 +127,92 @@ resolve_include_path() {
   esac
 }
 
+branch_matches_onbranch_condition() {
+  local branch_name=$1
+  local branch_pattern=$2
+  if [[ "$branch_pattern" == */ ]]; then
+    branch_pattern="${branch_pattern}**"
+  fi
+  [[ "$branch_name" == $branch_pattern ]]
+}
+
+conditioned_include_is_active() {
+  local worktree_path=$1
+  local parent_path=$2
+  local target_path=$3
+  local origin
+  local config_entry
+  while IFS= read -r -d '' origin && IFS= read -r -d '' config_entry; do
+    if [[ "${origin#file:}" == "$target_path" ]]; then
+      return 0
+    fi
+  done < <(git -C "$worktree_path" -c include.path="$parent_path" config \
+    --includes --null --show-origin --get-regexp '.*' 2>/dev/null || true)
+  return 1
+}
+
+validate_nested_conditioned_config() {
+  local worktree_path=$1
+  local config_path=$2
+  local branch_context=$3
+  local seen_key="$branch_context|$config_path"
+  local seen_path
+  local protected_values
+  local origin
+  local config_entry
+  local config_key
+  local include_path
+  local nested_path
+  local nested_branch_pattern
+  for seen_path in "${conditioned_config_files[@]}"; do
+    if [[ "$seen_path" == "$seen_key" ]]; then
+      return 0
+    fi
+  done
+  conditioned_config_files+=("$seen_key")
+  if [[ ! -f "$config_path" ]]; then
+    echo "ERROR: branch-conditioned include is unavailable: $config_path" >&2
+    return 1
+  fi
+  protected_values=$(git config --file "$config_path" \
+    --get-regexp "$protected_config_regex" 2>/dev/null || true)
+  if [[ -n "$protected_values" ]]; then
+    echo "ERROR: branch-conditioned safety override in $config_path: $protected_values" >&2
+    return 1
+  fi
+  while IFS= read -r -d '' origin && IFS= read -r -d '' config_entry; do
+    config_key=${config_entry%%$'\n'*}
+    include_path=${config_entry#*$'\n'}
+    nested_path=$(resolve_include_path "$worktree_path" "$origin" "$include_path") || return 1
+    case "$config_key" in
+      include.path)
+        validate_nested_conditioned_config \
+          "$worktree_path" "$nested_path" "$branch_context" || return 1
+        ;;
+      includeif.onbranch:*.path)
+        nested_branch_pattern=${config_key#includeif.onbranch:}
+        nested_branch_pattern=${nested_branch_pattern%.path}
+        if [[ -z "$branch_context" ]] || \
+          branch_matches_onbranch_condition "$branch_context" "$nested_branch_pattern"; then
+          validate_nested_conditioned_config \
+            "$worktree_path" "$nested_path" "$branch_context" || return 1
+        fi
+        ;;
+      includeif.*.path)
+        if conditioned_include_is_active "$worktree_path" "$config_path" "$nested_path"; then
+          validate_nested_conditioned_config \
+            "$worktree_path" "$nested_path" "$branch_context" || return 1
+        fi
+        ;;
+    esac
+  done < <(git config --file "$config_path" --null --show-origin \
+    --get-regexp '^(include\.path|includeif\..*\.path)$' 2>/dev/null || true)
+}
+
 validate_conditioned_config_file() {
   local worktree_path=$1
   local config_path=$2
+  local branch_context=$3
   local baseline_values
   local protected_values
   if [[ ! -f "$config_path" ]]; then
@@ -142,18 +226,36 @@ validate_conditioned_config_file() {
     echo "ERROR: branch-conditioned safety override in $config_path: $protected_values" >&2
     return 1
   fi
+  conditioned_config_files=()
+  validate_nested_conditioned_config \
+    "$worktree_path" "$config_path" "$branch_context"
 }
 
 validate_branch_conditioned_config() {
   local worktree_path=$1
   local origin
   local config_entry
+  local config_key
   local include_path
   local config_path
+  local branch_pattern
+  local branch_context
   while IFS= read -r -d '' origin && IFS= read -r -d '' config_entry; do
+    config_key=${config_entry%%$'\n'*}
     include_path=${config_entry#*$'\n'}
     config_path=$(resolve_include_path "$worktree_path" "$origin" "$include_path") || return 1
-    validate_conditioned_config_file "$worktree_path" "$config_path" || return 1
+    branch_pattern=${config_key#includeif.onbranch:}
+    branch_pattern=${branch_pattern%.path}
+    case "$branch_pattern" in
+      *'*'* | *'?'* | *'['* | */)
+        branch_context=''
+        ;;
+      *)
+        branch_context=$branch_pattern
+        ;;
+    esac
+    validate_conditioned_config_file \
+      "$worktree_path" "$config_path" "$branch_context" || return 1
   done < <(git -C "$worktree_path" config --null --show-origin --get-regexp '^includeif\.onbranch:.*\.path$' 2>/dev/null || true)
 }
 
@@ -276,6 +378,7 @@ done
 
 if [[ "$mode" == "apply" ]]; then
   git config --local --unset-all remote.origin.push 2>/dev/null || true
+  git config --local --unset-all remote.origin.mirror 2>/dev/null || true
   while IFS= read -r branch_push_key; do
     [[ -n "$branch_push_key" ]] || continue
     git config --local --unset-all "$branch_push_key"
@@ -307,6 +410,7 @@ fi
 for worktree_path in "${worktree_paths[@]}"; do
   validate_effective_upstream_push "$worktree_path"
   validate_effective_unset "$worktree_path" remote.origin.push
+  validate_effective_unset "$worktree_path" remote.origin.mirror
   validate_effective_branch_push_remotes "$worktree_path"
 done
 

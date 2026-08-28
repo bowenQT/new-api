@@ -165,6 +165,10 @@ git -C "$fixture_repo" config --local --replace-all remote.origin.fetch \
 expect_failure "remote.origin.fetch expected exactly one value '+refs/heads/*:refs/remotes/origin/*'" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
 run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --apply >/dev/null
+git -C "$fixture_repo" config --local remote.origin.mirror true
+expect_failure "effective remote.origin.mirror must be unset" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --apply >/dev/null
 
 git -C "$fixture_repo" config --local extensions.worktreeConfig true
 git -C "$fixture_repo" config --worktree push.default current
@@ -175,6 +179,10 @@ git -C "$fixture_repo" config --worktree branch.main.merge refs/heads/downstream
 expect_failure "effective branch.main.merge expected exactly one value 'refs/heads/main'" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
 git -C "$fixture_repo" config --worktree --unset branch.main.merge
+git -C "$fixture_repo" config --worktree remote.origin.mirror true
+expect_failure "effective remote.origin.mirror must be unset" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --worktree --unset remote.origin.mirror
 run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check >/dev/null
 
 linked_worktree="$fixture_root/valid-linked"
@@ -244,6 +252,23 @@ expect_failure "branch-conditioned safety override" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
 git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
 git config --file "$main_branch_config" --unset-all remote.origin.fetch
+git config --file "$main_branch_config" remote.origin.mirror true
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$main_branch_config"
+expect_failure "branch-conditioned safety override" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+git config --file "$main_branch_config" --unset-all remote.origin.mirror
+nested_onbranch_outer_config="$fixture_root/nested-onbranch-outer-config"
+nested_onbranch_inner_config="$fixture_root/nested-onbranch-inner-config"
+git config --file "$nested_onbranch_inner_config" branch.main.merge \
+  refs/heads/downstream/main
+git config --file "$nested_onbranch_outer_config" includeIf.onbranch:main.path \
+  "$nested_onbranch_inner_config"
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path \
+  "$nested_onbranch_outer_config"
+expect_failure "branch-conditioned safety override" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
 nested_outer_config="$fixture_root/nested-outer-config"
 nested_inactive_config="$fixture_root/nested-inactive-config"
 git config --file "$nested_inactive_config" pull.ff false
@@ -257,6 +282,15 @@ git config --file "$nested_outer_config" \
   includeIf.gitdir:/definitely/not/this/repository/.path "$nested_inactive_config"
 git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$nested_outer_config"
 run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check >/dev/null
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+git config --file "$nested_outer_config" --unset-all \
+  includeIf.gitdir:/definitely/not/this/repository/.path
+fixture_git_dir=$(git -C "$fixture_repo" rev-parse --absolute-git-dir)
+git config --file "$nested_outer_config" \
+  "includeIf.gitdir:$fixture_git_dir.path" "$nested_inactive_config"
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$nested_outer_config"
+expect_failure "branch-conditioned safety override" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
 git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
 tilde_home="$fixture_root/tilde-home"
 mkdir -p "$tilde_home"
