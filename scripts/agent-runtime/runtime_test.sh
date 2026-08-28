@@ -221,6 +221,13 @@ git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$main_branch
 expect_failure "branch-conditioned safety override" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
 git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+tilde_home="$fixture_root/tilde-home"
+mkdir -p "$tilde_home"
+git config --file "$tilde_home/main.conf" color.ui auto
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path '~/main.conf'
+HOME="$tilde_home" run_in_repo "$fixture_repo" \
+  scripts/agent-runtime/bootstrap.sh --check >/dev/null
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
 expect_failure "edit mode requires a symbolic topic branch" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/preflight.sh --mode edit
 

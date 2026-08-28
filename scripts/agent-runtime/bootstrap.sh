@@ -112,7 +112,7 @@ resolve_include_path() {
       printf '%s\n' "$include_path"
       ;;
     '~/'*)
-      printf '%s/%s\n' "${HOME}" "${include_path#~/}"
+      printf '%s/%s\n' "${HOME}" "${include_path:2}"
       ;;
     '%(home)/'*)
       printf '%s/%s\n' "${HOME}" "${include_path#%(home)/}"
