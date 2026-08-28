@@ -78,8 +78,16 @@ matches_github_repo() {
   return 1
 }
 
-protected_config_regex='^(remote\.(origin|upstream)\.(fetch|url|pushurl)|remote\.origin\.(mirror|push)|remote\.pushdefault|url\..*\.(insteadof|pushinsteadof)|push\.default|pull\.ff|fetch\.prune|rebase\.autostash|merge\.autostash|merge\.conflictstyle|rerere\.enabled|rerere\.autoupdate|branch\..*\.pushremote|branch\.main\.(remote|merge)|branch\.downstream/main\.(remote|merge))$'
+protected_config_regex='^(remote\.(origin|upstream)\.(fetch|url|pushurl)|remote\.origin\.(mirror|push)|remote\.pushdefault|url\..*\.(insteadof|pushinsteadof)|push\.default|pull\.ff|fetch\.prune|rebase\.autostash|merge\.autostash|merge\.conflictstyle|rerere\.enabled|rerere\.autoupdate|branch\..*\.pushremote|branch\.main\.(remote|merge|mergeoptions)|branch\.downstream/main\.(remote|merge|mergeoptions))$'
 conditioned_config_files=()
+onbranch_match_root=''
+
+cleanup_onbranch_match() {
+  if [[ -n "$onbranch_match_root" ]]; then
+    rm -rf -- "$onbranch_match_root"
+  fi
+}
+trap cleanup_onbranch_match EXIT
 
 resolve_include_path() {
   local worktree_path=$1
@@ -146,10 +154,16 @@ onbranch_condition_is_exact() {
 onbranch_condition_matches_branch() {
   local branch_pattern=$1
   local branch_name=$2
-  if [[ "$branch_pattern" == */ ]]; then
-    branch_pattern="${branch_pattern}**"
+  if [[ -z "$onbranch_match_root" ]]; then
+    onbranch_match_root=$(mktemp -d "${TMPDIR:-/tmp}/newapi-onbranch-match.XXXXXX")
+    git init --bare --quiet "$onbranch_match_root/repo.git"
+    git config --file "$onbranch_match_root/matched.conf" agentRuntime.matched true
   fi
-  [[ "$branch_name" == $branch_pattern ]]
+  git --git-dir="$onbranch_match_root/repo.git" symbolic-ref \
+    HEAD "refs/heads/$branch_name" >/dev/null 2>&1 || return 1
+  git --git-dir="$onbranch_match_root/repo.git" \
+    -c "includeIf.onbranch:$branch_pattern.path=$onbranch_match_root/matched.conf" \
+    config --includes --get agentRuntime.matched >/dev/null 2>&1
 }
 
 onbranch_condition_prefix() {
@@ -438,6 +452,8 @@ done
 if [[ "$mode" == "apply" ]]; then
   git config --local --unset-all remote.origin.push 2>/dev/null || true
   git config --local --unset-all remote.origin.mirror 2>/dev/null || true
+  git config --local --unset-all branch.main.mergeOptions 2>/dev/null || true
+  git config --local --unset-all branch.downstream/main.mergeOptions 2>/dev/null || true
   while IFS= read -r branch_push_key; do
     [[ -n "$branch_push_key" ]] || continue
     git config --local --unset-all "$branch_push_key"
@@ -472,6 +488,8 @@ for worktree_path in "${worktree_paths[@]}"; do
   validate_effective_upstream_push "$worktree_path"
   validate_effective_unset "$worktree_path" remote.origin.push
   validate_effective_unset "$worktree_path" remote.origin.mirror
+  validate_effective_unset "$worktree_path" branch.main.mergeOptions
+  validate_effective_unset "$worktree_path" branch.downstream/main.mergeOptions
   validate_effective_branch_push_remotes "$worktree_path"
 done
 
