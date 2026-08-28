@@ -244,6 +244,7 @@ func SetApiRouter(router *gin.Engine) {
 		upstreamPriceRoute.Use(middleware.RootAuth())
 		{
 			upstreamPriceRoute.GET("/current", controller.GetCurrentUpstreamPrices)
+			upstreamPriceRoute.POST("/compare", controller.CompareUpstreamPrices)
 		}
 		registerChannelRoutes(apiRouter)
 		registerAuthzRoutes(apiRouter)

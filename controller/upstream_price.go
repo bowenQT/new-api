@@ -113,3 +113,19 @@ func GetCurrentUpstreamPrices(c *gin.Context) {
 	}
 	common.ApiSuccess(c, catalog)
 }
+
+// CompareUpstreamPrices returns the estimate-only cost / sale price / margin
+// comparison (spec §9.2, §10.3). It writes no state.
+func CompareUpstreamPrices(c *gin.Context) {
+	request := dto.UpstreamPriceCompareRequest{}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	comparison, err := upstreamprice.CompareUpstreamPrices(&request)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, comparison)
+}
