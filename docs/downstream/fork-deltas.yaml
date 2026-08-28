@@ -47,7 +47,7 @@ entries:
   - id: upstream-price-catalog-phase1
     status: active
     owner: downstream-maintainers
-    introduced_commit: PENDING
+    introduced_commit: f59e9d3545a3ea0a64542b7dbfd3f5b7779f9799
     purpose: Read-only upstream price catalog (PriceSource/PriceSnapshot/PriceSyncRun models, adapter registry with the Vercel AI Gateway cost adapter, manual preview/sync, current-price query) per docs/downstream/upstream-price-catalog-spec.md Phase 1, without touching any sale-pricing configuration.
     paths:
       - model/main.go
