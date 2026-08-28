@@ -227,13 +227,34 @@ conditioned_include_is_active() {
   return 1
 }
 
+conditioned_scalar_value_is_safe() {
+  local config_key=$1
+  local config_value=$2
+  case "$config_key $config_value" in
+    'remote.pushdefault origin' | \
+      'push.default simple' | \
+      'pull.ff only' | \
+      'fetch.prune false' | \
+      'rebase.autostash false' | \
+      'merge.autostash false' | \
+      'merge.conflictstyle zdiff3' | \
+      'rerere.enabled true' | \
+      'rerere.autoupdate false' | \
+      'branch.main.remote origin' | \
+      'branch.downstream/main.remote origin')
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 validate_nested_conditioned_config() {
   local worktree_path=$1
   local config_path=$2
   local branch_context=$3
   local seen_key="$branch_context|$config_path"
   local seen_path
-  local protected_values
+  local protected_value
   local origin
   local config_entry
   local config_key
@@ -251,12 +272,16 @@ validate_nested_conditioned_config() {
     echo "ERROR: branch-conditioned include is unavailable: $config_path" >&2
     return 1
   fi
-  protected_values=$(git config --file "$config_path" \
-    --get-regexp "$protected_config_regex" 2>/dev/null || true)
-  if [[ -n "$protected_values" ]]; then
-    echo "ERROR: branch-conditioned safety override in $config_path: $protected_values" >&2
+  while IFS= read -r -d '' config_entry; do
+    config_key=${config_entry%%$'\n'*}
+    protected_value=${config_entry#*$'\n'}
+    if conditioned_scalar_value_is_safe "$config_key" "$protected_value"; then
+      continue
+    fi
+    echo "ERROR: branch-conditioned safety override in $config_path: $config_key $protected_value" >&2
     return 1
-  fi
+  done < <(git config --file "$config_path" --null \
+    --get-regexp "$protected_config_regex" 2>/dev/null || true)
   while IFS= read -r -d '' origin && IFS= read -r -d '' config_entry; do
     config_key=${config_entry%%$'\n'*}
     include_path=${config_entry#*$'\n'}
@@ -293,17 +318,8 @@ validate_conditioned_config_file() {
   local worktree_path=$1
   local config_path=$2
   local branch_context=$3
-  local baseline_values
-  local protected_values
   if [[ ! -f "$config_path" ]]; then
     echo "ERROR: branch-conditioned include is unavailable: $config_path" >&2
-    return 1
-  fi
-  baseline_values=$(git -C "$worktree_path" config --includes --get-regexp "$protected_config_regex" 2>/dev/null || true)
-  protected_values=$(git -C "$worktree_path" -c include.path="$config_path" \
-    config --includes --get-regexp "$protected_config_regex" 2>/dev/null || true)
-  if [[ "$protected_values" != "$baseline_values" ]]; then
-    echo "ERROR: branch-conditioned safety override in $config_path: $protected_values" >&2
     return 1
   fi
   conditioned_config_files=()

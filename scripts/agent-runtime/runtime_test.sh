@@ -293,6 +293,11 @@ expect_failure "branch-conditioned safety override" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
 git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
 git config --file "$main_branch_config" --unset-all remote.origin.mirror
+git config --file "$main_branch_config" pull.ff only
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$main_branch_config"
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check >/dev/null
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+git config --file "$main_branch_config" --unset-all pull.ff
 nested_onbranch_outer_config="$fixture_root/nested-onbranch-outer-config"
 nested_onbranch_inner_config="$fixture_root/nested-onbranch-inner-config"
 git config --file "$nested_onbranch_inner_config" branch.main.merge \
