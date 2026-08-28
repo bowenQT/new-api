@@ -2,7 +2,7 @@
 
 ## 文档状态
 
-- 状态：Draft，待评审
+- 状态：Draft rev4，Codex 两轮评审完成（第二轮 4 MAJOR / 4 MINOR 全部采纳），进入 Phase 1 实施
 - 日期：2026-08-28
 - 适用分支基线：`downstream/main@7f7f006af8e5fdb027865d05107e93a267ece46e`
 - 风险等级：S3（计费域设计；本文档本身不修改计费、数据库或生产配置）
@@ -49,6 +49,14 @@ New API 普通用户倍率 G = 1.0
 ```
 
 如果把 Vercel 的 `8` 直接同步到 New API 模型定价，普通用户倍率为 `1.0` 时，用户也只支付 `8`，成本和售价被错误合并。
+
+价格口径实证（2026-08-28 实测）：`GET https://ai-gateway.vercel.sh/v1/models` 无鉴权返回 HTTP 200。
+与 models.dev 收录的厂商标价对比，`openai/gpt-5.6-sol` Vercel 报价 $2/$10（input/output，每 1M tokens），
+厂商标价为 $4/$20，即 Vercel 五折，且该模型带 `varies_by_provider: true`；`openai/gpt-5.6-luna` 与
+`openai/gpt-5.6-terra` 两边一致。这证明 Vercel `/v1/models` 返回的是 gateway 对所有客户统一的实际
+收费价（含 Vercel 自身促销折扣），不是厂商标价。站点管理员已确认其 Vercel 账号按公开目录价结算、
+无账号级折扣，因此该来源可作为真实渠道成本参与毛利计算，`scope = public` 成立。上方 C=8 / L=10
+为示意数字；sol 的 2 对 4 即该关系的真实实例。
 
 ### 2.2 当前代码事实
 
@@ -114,7 +122,7 @@ New API 普通用户倍率 G = 1.0
 - `service_tier`：特定服务等级价格。
 - `unknown`：来源没有提供足够证据判断适用范围。
 
-一个来源无法证明价格适用范围时必须标记为 `public` 或 `unknown`，不得擅自声称是账号实际结算价。
+一个来源无法证明价格适用范围时一律标记为 `unknown`，不得擅自声称是账号实际结算价。`public` 必须有公开可访问且对所有客户一致的证据；Vercel 首源满足该证据要求（见 §2.1）。
 
 ### 4.3 强制不变量
 
@@ -132,10 +140,10 @@ New API 普通用户倍率 G = 1.0
    - 任意分组倍率、用户余额或渠道余额
 2. 所有目录价格都是观察值，不是扣费权威。
 3. 销售价变更必须是独立管理员动作，并在写前展示完整 diff。
-4. 价格快照不可原地改写；同一内容通过指纹实现幂等。
+4. 价格快照的价格内容不可原地改写；同一内容通过指纹实现幂等。幂等命中时仅允许更新观察证据字段 `last_seen_at` 与 `last_seen_run_id`，其余字段一律不可变。
 5. 抓取失败或返回模型变少时保留上次成功快照，不将缺失模型解释为零成本。
 6. 成本解析失败不得回退为销售价，也不得生成零价格。
-7. 所有金额计算使用十进制定点语义，不使用二进制浮点作为持久化权威。
+7. 来源解析、归一化、持久化与指纹使用十进制字符串；表达式求值（含毛利展示计算）使用有界 float64，必须拒绝 NaN/Inf 并做边界检查；不声称全链路定点。
 8. 来源凭证、API Key、Authorization header 和完整私有响应不得写入价格快照或普通日志。
 
 ## 5. 总体架构
@@ -177,7 +185,7 @@ service/upstreamprice/
     vercel_gateway.go     Vercel /v1/models 首适配器
 ```
 
-对应持久化模型放在 `model/upstream_price.go`；HTTP controller 只负责鉴权、DTO 校验和调用 service，不承载供应商解析逻辑。
+对应持久化模型放在 `model/upstream_price.go`；HTTP controller 只负责鉴权、DTO 校验和调用 service，不承载供应商解析逻辑。请求/响应 DTO 放在根模块 `dto/`，不进入 `relaykit/dto`（relaykit 公共 API 保持不变的承诺见 §3.2）。
 
 ## 6. 统一适配器契约
 
@@ -204,17 +212,18 @@ type Observation struct {
     FormulaKind        string
     PriceExpr          string
     EffectiveAt        *time.Time
-    SourceRevision     string
     Metadata           map[string]string
 }
 ```
+
+`FetchMeta` 携带来源级抓取证据（ETag、版本号或来源更新时间），持久化到 `PriceSyncRun.source_revision`（见 §7.3），不再逐快照保存。
 
 约束：
 
 - `PriceExpr` 只表示价格观察值；不得写入 `billing_setting`。
 - 表达式变量与现有 billing expression 对齐，例如 `p`、`c`、`cr` 和 `len`，以便准确表示长上下文阶梯。
 - flat token price 也归一化为单档表达式，避免另建一套计算引擎。
-- 每个适配器必须声明来源角色和适用范围，不能仅返回数字。
+- 每个适配器必须声明其允许的 role/scope 集合，不能仅返回数字。role/scope 取值算法唯一：Observation 未给值时取 PriceSource 的默认声明；给了值但超出 adapter 或来源允许范围时拒绝该 observation（run item 计为 rejected），禁止静默覆盖。
 - provider-specific 字段保留在受控 metadata 中，不进入核心计费公式。
 
 `FormulaKind` 首版支持：
@@ -222,30 +231,43 @@ type Observation struct {
 - `token_expr_v1`：系数单位为 USD / 1M tokens；表达式运行结果除以 1,000,000 后得到 USD。
 - `per_call_v1`：表达式结果直接表示单次请求 USD 成本，不再除以 1,000,000。
 
-不同 `FormulaKind` 之间不得直接比较。未来媒体、时长或供应商自定义单位必须新增显式版本，不能复用一个含义模糊的 `price` 数字。
+不同 `FormulaKind` 之间在系数与表达式层面不得直接比较；在同一 usage vector 下求值为同币种金额后可以且必须可比（例如按次销售价与 token 成本之间的毛利比较，见 §9.3）。未来媒体、时长或供应商自定义单位必须新增显式版本，不能复用一个含义模糊的 `price` 数字。
 
 ### 6.2 Vercel 首适配器
+
+实测（2026-08-28）该 endpoint 返回约 358 个模型，pricing 对象出现过约 24 种键（以实测为准），
+价格为十进制字符串（USD/token）。除 `input`、`output`、`input_cache_read`、`input_cache_write`
+及对应 `*_tiers` 外，还有 `fast`、`service_tiers`、`regional`、`peak_pricing`、`varies_by_provider`、
+`web_search`、`image`、`image_dimension_quality_pricing`、`audio_input_token_cost`、
+`audio_output_token_cost`、`speech_input_character_cost`、`transcription_duration_cost_per_second`、
+`realtime_client_message_cost`、`realtime_session_duration_cost_per_second`、`maps_search`、
+`video_duration_pricing`、`video_token_pricing` 等场景专属维度。首版仅归一化 input、output、
+cache read、cache write 的 flat 价格与长上下文 tiers。
 
 Vercel adapter 必须：
 
 - 只匹配精确主机 `ai-gateway.vercel.sh`，拒绝后缀伪造域名。
 - 使用固定 canonical endpoint `https://ai-gateway.vercel.sh/v1/models`。
-- 解析 input、output、cache read 和长上下文 tiers。
+- 解析 input、output、cache read、cache write 的 flat 价格与长上下文 tiers。
 - 将两档且阈值一致的价格转成可审计表达式。
+- tier 边界按半开区间 `[min, max)` 解释：`min` 含、`max` 不含。例如 `{"cost":"0.000003","min":0,"max":200001}` 与 `{"cost":"0.000006","min":200001}` 归一化为 `len <= 200000` 的两档表达式。该开闭语义必须有对应测试向量。
 - 对不一致、重叠或无法封闭覆盖的 tiers fail closed。
-- 不把 `service_tiers`、`regional`、`fast` 或 cache write 猜测成默认成本。
-- 为未支持的价格维度生成 warning，不静默丢失后声称完整。
-- 把来源标记为 `supplier_cost`；其 `scope` 以接口实际证明为准，首版默认 `public`，除非有账号级证据。
+- 带 `varies_by_provider: true` 的模型：观察值仍保存，但必须在 metadata 打标，并在目录查询和 UI 强制展示“多 provider 价格不一，成本不确定”，不得标为“当前已确认成本”。
+- 不把 `peak_pricing`、`service_tiers`、`regional`、`fast`、`web_search` 或 image/audio/video 专属维度猜测成默认成本；为这些未支持的价格维度生成 warning，不静默丢失后声称完整。
+- 覆盖率统计必须把“无法归一化（unsupported）”与“来源缺失（missing）”分开计数，避免 unsupported warning 淹没真实缺失。
+- 把来源标记为 `supplier_cost`；`scope` 为 `public`（实证与管理员确认见 §2.1）。
 - 不需要也不得发送渠道 API Key，因为当前 endpoint 是公开模型目录。
+- 抓取 HTTP client 必须禁止重定向（`CheckRedirect` 直接拒绝）、设置连接/响应/总超时，并对响应体按解压后大小设最大字节数上限，超限显式失败。
+- 不得复用现有 ratio_sync 的 HTTP client 构建模式（其未设置 `CheckRedirect`）。
 
 ### 6.3 后续适配器
 
 后续供应商必须复用相同契约，不能在 controller 中继续堆叠 URL 特判。候选顺序：
 
 1. OpenRouter：渠道成本或公开路由价格。
-2. 厂商官方机器可读价：`vendor_list`。
-3. models.dev：`curated_reference`，不能标成厂商官方。
-4. 人工合同价：`supplier_cost + contract`，必须有独立权限和审计。
+2. 厂商官方机器可读价：`vendor_list`。首版不做，待有厂商官方机器可读源再立项。
+3. basellm / models.dev：`curated_reference`，不能标成厂商官方；UI 必须标注非官方。Phase 2 接入。
+4. 人工合同价：`supplier_cost + contract`，必须有独立权限和审计。不进首版，后续独立立项。
 
 ## 7. 数据模型
 
@@ -265,7 +287,9 @@ Vercel adapter 必须：
 | `schedule_enabled` | bool | 是否允许后台定时同步，默认 false |
 | `schedule_interval_seconds` | bigint | 最小值受后端约束 |
 | `settings` | text | 非秘密 JSON 配置 |
-| `last_success_at` | nullable bigint | 最近成功时间 |
+| `config_revision` | bigint | 配置修订号；每次配置修改递增 |
+| `last_success_run_id` | nullable int | 最近成功（succeeded/partial）run；当前价判定权威 |
+| `last_success_at` | nullable bigint | 最近成功时间（展示冗余；权威为 `last_success_run_id`） |
 | `last_error_at` | nullable bigint | 最近失败时间 |
 | `last_error_summary` | varchar(255) | 脱敏摘要，不保存响应正文 |
 | `created_time` | bigint | 创建时间 |
@@ -276,7 +300,9 @@ Vercel adapter 必须：
 - `channel_id` 使用普通索引，不依赖数据库特有 partial index。
 - `settings` 使用 TEXT，由 `common.Marshal` / `common.Unmarshal` 管理。
 - secret 只引用现有渠道凭证，不复制进 `settings`。
-- 删除渠道时默认禁用来源并保留历史快照，不级联删除审计证据。
+- 角色与渠道组合约束：`supplier_cost` 来源创建/更新时必须关联一个存在且启用的 channel；`vendor_list` / `curated_reference` 不得关联 channel。MySQL 5.7 的 CHECK 约束不可靠，以 service 层校验为权威，并配行为测试。
+- 渠道删除不挂钩：不修改现有渠道删除路径（单删、批量删、删除禁用渠道均直接删除 Channel，挂钩这三条路径会扩大对 upstream-owned 代码的修改面）。改为查询与调度侧 orphan 检测：关联 channel 不存在时来源标记 `orphaned`，UI 明示；orphan 来源允许 Preview（诊断用途），手动 Commit 与定时执行一律拒绝，历史快照保留。
+- 来源上的 `role` / `scope` 只是“新快照的默认声明”（取值算法见 §6.1）；快照写入后其自带的 role/scope/provider/mapping_status 即历史权威，事后修改来源的 role/scope 不重新解释历史快照。
 
 ### 7.2 PriceSnapshot
 
@@ -288,26 +314,79 @@ Vercel adapter 必须：
 | `source_id` | int | PriceSource ID |
 | `source_model_name` | varchar(255) | 来源原始模型名 |
 | `canonical_model_name` | varchar(255) | 同步时解析出的统一模型名 |
+| `role` | varchar(32) | 写入时的价格角色（取值算法见 §6.1）；历史权威 |
+| `scope` | varchar(32) | 写入时的适用范围；历史权威 |
+| `provider` | varchar(64) | 写入时解析出的 provider |
+| `mapping_status` | varchar(16) | mapped_default / mapped_explicit / unmapped |
 | `currency` | varchar(8) | 首版仅允许 USD |
 | `formula_kind` | varchar(32) | token_expr_v1/per_call_v1 |
 | `price_expr` | text | 归一化价格表达式 |
 | `expr_version` | varchar(32) | 表达式版本 |
 | `effective_at` | nullable bigint | 来源明确给出的生效时间 |
-| `fetched_at` | bigint | 本次抓取时间 |
-| `source_revision` | varchar(128) | ETag、版本号或来源更新时间 |
+| `fetched_at` | bigint | 首次抓取到该内容的时间 |
+| `last_seen_at` | bigint | 最近一次观察到该内容的时间；幂等命中时更新（观察证据，非当前价权威） |
+| `last_seen_run_id` | int | 最近一次观察到该内容的 run；幂等命中时更新 |
 | `fingerprint` | char(64) | 规范化内容 SHA-256 |
+| `fingerprint_version` | varchar(16) | 指纹算法与 canonical payload 版本；进入 canonical payload |
 | `metadata` | text | 受控、非秘密 JSON |
 | `created_time` | bigint | 入库时间 |
 
 索引和幂等：
 
 - 唯一键：`source_id + source_model_name + fingerprint`。
-- 当前价查询索引：`source_id + canonical_model_name + fetched_at`。
+- 当前价查询：按 `last_seen_run_id = PriceSource.last_success_run_id` 过滤（run 语义见 §7.3）；索引建议 `source_id + last_seen_run_id`。
+- 幂等与振荡：价格 A→B→A 振荡时，回到 A 的观察与首个 A 快照命中同一指纹、不新增记录，幂等命中更新 `last_seen_at` 与 `last_seen_run_id`，当前价按 run 语义正确回到 A。仓库时间戳为秒级，同一秒内两次同步无法按时间排序，因此排序权威是单调递增的 run id，`last_seen_at` 仅作观察证据。
+- `fingerprint` 列在 MySQL 下建议使用 ascii collation 或等效二进制存储；唯一键长度在 SQLite、MySQL、PostgreSQL 三库下的行为必须有迁移测试覆盖。
 - 不使用数据库 JSON 查询、partial index 或数据库特有 upsert SQL。
-- 持久化前将金额规范化为十进制字符串，指纹基于 canonical JSON。
-- 指纹输入必须包含 role、scope、source model、canonical model、currency、formula kind、price expression 和影响价格语义的 metadata；模型映射变化即使价格数字不变，也必须生成新快照。
+- 持久化前将金额规范化为十进制字符串，指纹基于版本化 canonical payload 的 canonical JSON。
+- 指纹覆盖版本化 canonical payload 的全部语义字段：fingerprint_version、role、scope、provider、source_model、canonical_model、currency、formula_kind、price_expr、expr_version、effective_at 和影响价格语义的 metadata；模型映射变化即使价格数字不变，也必须生成新快照。
 
-### 7.3 不新增销售价表
+### 7.3 PriceSyncRun
+
+同步批次记录及其条目明细，是当前价、missing 与新鲜度判定的权威。
+
+| 字段 | 类型建议 | 说明 |
+| --- | --- | --- |
+| `id` | int | GORM 主键；单调递增，排序权威 |
+| `source_id` | int | PriceSource ID |
+| `status` | varchar(16) | succeeded / partial / failed |
+| `adapter_key` | varchar(64) | 执行时的适配器标识 |
+| `started_at` | bigint | 开始时间 |
+| `finished_at` | nullable bigint | 完成时间 |
+| `duration_ms` | bigint | 抓取与处理耗时 |
+| `http_status` | int | 上游 HTTP 状态 |
+| `response_bytes` | bigint | 响应大小（解压后） |
+| `source_config_revision` | bigint | 执行时的 PriceSource `config_revision` |
+| `source_config_digest` | varchar(64) | 非秘密配置摘要 |
+| `source_revision` | varchar(128) | ETag、版本号或来源更新时间（来源级抓取证据） |
+| `discovered_count` | int | 发现模型数 |
+| `valid_count` | int | 有效观察值数 |
+| `unsupported_count` | int | 无法归一化数 |
+| `rejected_count` | int | 被验证拒绝数 |
+| `missing_count` | int | 相比上次成功缺失数 |
+| `new_snapshot_count` | int | 新增快照数 |
+| `idempotent_hit_count` | int | 幂等命中数 |
+| `error_summary` | varchar(255) | 脱敏错误摘要 |
+
+每个 run 同时写入条目明细 `PriceSyncRunItem`：
+
+| 字段 | 类型建议 | 说明 |
+| --- | --- | --- |
+| `run_id` | int | PriceSyncRun ID |
+| `source_model_name` | varchar(255) | 来源原始模型名 |
+| `status` | varchar(16) | valid / unsupported / rejected / missing |
+| `snapshot_id` | nullable int | status=valid 时指向的快照 |
+| `warning_code` | varchar(64) | unsupported/rejected 的机器可读原因 |
+
+语义：
+
+- 当前价 = 来源 `last_success_run`（`PriceSource.last_success_run_id` 指向的 run）中 `status = valid` 的 run item 指向的快照。
+- missing = 该 run 中上游确实未返回的历史模型（run item `status = missing`）。上游返回了但无法归一化（unsupported）或被验证拒绝（rejected）的模型不得被判为 missing。
+- `succeeded` 与 `partial` 均推进 `last_success_run_id`；`failed` 不推进。
+- 排序权威是单调递增的 run id。仓库时间戳为秒级，同一秒内两次同步无法排序，不得以时间戳为排序权威。
+- 并发控制：手动 sync 与未来定时 sync 共用 per-source 串行化。commit 事务内对 `PriceSource` 行使用项目的 `lockForUpdate(tx)` helper 获取行锁，锁内校验 `config_revision` 后写入 run、run item、快照并推进 `last_success_run_id`。`lockForUpdate(tx)` 在 SQLite 分支不加行锁，依赖并发冲突时事务失败；合同为：任何一步 GORM 错误都使整次 commit 事务 rollback，返回要求重新 Preview/重试。三库并发行为测试见 §18.2。
+
+### 7.4 不新增销售价表
 
 首版不复制现有销售定价。当前售价继续由以下配置提供：
 
@@ -317,7 +396,15 @@ Vercel adapter 必须：
 - `billing_setting.billing_expr`
 - 分组倍率
 
-目录查询 service 在读取时把“当前销售价”投影到对比 DTO，避免形成第二个销售价权威。
+目录查询 service 在读取时把“当前销售价”投影到对比 DTO（投影规则见 §9.3），避免形成第二个销售价权威。
+
+### 7.5 统一模型名映射
+
+- `canonical_model_name` 默认由 `source_model_name` 剥离一层 `provider/` 前缀得到，例如 `openai/gpt-5.6-luna` → `gpt-5.6-luna`；映射方式写入快照 `mapping_status`（mapped_default / mapped_explicit / unmapped）。
+- `PriceSource.settings` 可提供显式映射表覆盖默认规则。
+- 映射结果进入指纹（见 §7.2）；模型映射变化即使价格数字不变，也会生成新快照。
+- 无法映射或映射冲突时保留原名并标记 `unmapped`，不猜测目标模型。
+- canonical 冲突：同一 source 内多个 `source_model_name` 映射到同一 `canonical_model_name` 时，目录查询返回全部候选并标注 conflict，不按时间任选一条。
 
 ## 8. 同步语义
 
@@ -333,32 +420,41 @@ Vercel adapter 必须：
 2. Commit
    - 管理员手动同步时，在确认 Preview 后写入。
    - 定时任务只允许写价格快照，不修改销售价。
-   - 写入使用事务和指纹幂等。
+   - 写入使用事务和指纹幂等；事务内对 `PriceSource` 行使用 `lockForUpdate(tx)` 获取行锁，实现手动与定时同步的 per-source 串行化。`lockForUpdate(tx)` 在 SQLite 分支不加行锁、依赖冲突事务失败；任何一步 GORM 错误都使整次 commit 事务 rollback，返回要求重新 Preview/重试（见 §7.3）。
 
 手动 Commit 不接受客户端回传的价格内容。服务端必须重新抓取并归一化来源，只有重新计算出的结果
 hash 与未过期 `preview_hash` 一致时才写入；不一致则要求重新 Preview。定时任务没有人工 Preview，
 但必须执行同一组验证、覆盖率和变化阈值门禁。
 
+`preview_hash` 实现契约：使用 HMAC，key 在进程内随机生成、不持久化。HMAC claim 明确定义为：claim
+版本、source ID、source `config_revision`、`base_run_id`（Preview 时的 `last_success_run_id`）、完整
+preview DTO 摘要（新增/变化/rejected/unsupported/missing 清单与覆盖率）、验证与门禁配置版本，以及
+过期时间。Commit 在事务内使用 token 内的 `config_revision` 与 `base_run_id` 做 CAS 校验，禁止客户端
+另行传入或覆盖这两个值；配置或基线已变则拒绝并要求重新 Preview。进程重启，或多实例部署下 Preview
+与 Commit 落在不同实例时，校验会失败并要求重新 Preview；首版接受此限制。Commit 无论如何都重新抓
+取并归一化，安全性不依赖该 key。
+
 ### 8.2 部分失败
 
-- 单模型格式异常：隔离该模型，其他有效观察值可以保存，同时记录 warning。
-- 有效模型数为 0：整次失败，不保存。
-- 相比上次成功覆盖率下降超过可配置阈值：默认拒绝 commit，标记需要人工复核。
-- 来源漏掉历史模型：不删除旧快照；目录把该模型标为 stale/missing。
-- HTTP 429/5xx/timeout：保留上次成功值，按现有 system task 重试策略处理。
-- 币种未知、负价格、NaN、Inf、阶梯重叠或表达式 smoke test 失败：拒绝该观察值。
+- 单模型格式异常：隔离该模型（run item 记为 `unsupported` 或 `rejected`，附 `warning_code`），其他有效观察值可以保存；run 状态记为 `partial`。被隔离的模型不得被判为 missing。
+- 有效模型数为 0：整次失败，run 状态记为 `failed`，不保存快照，不推进 `last_success_run_id`。
+- 相比上次成功覆盖率下降超过可配置阈值：默认拒绝 commit，run 记为 `failed` 并标记需要人工复核。
+- 来源漏掉历史模型：不删除旧快照；仅当上游确实未返回该模型（run item `status = missing`）时才判为 missing，目录据此标注。
+- HTTP 429/5xx/timeout：保留上次成功 run 的结果。`SystemTask` 只提供 lease 与周期调度，没有通用 HTTP 重试策略；重试与退避由 upstreamprice service 自行定义：最大重试次数、可重试状态码、指数退避、单来源超时与总超时。
+- 币种未知、负价格、NaN、Inf、阶梯重叠或表达式 smoke test 失败：拒绝该观察值（run item 记为 `rejected`）。
 
 ### 8.3 新鲜度
 
-- 当前价是该来源/模型最近一次成功且未失效的快照。
-- stale 阈值默认为同步周期的 2 倍；手工来源使用显式阈值。
+- 当前价与 stale 判定基于 run 模型：当前价是 `last_success_run` 中 `status = valid` 的 run item 指向的快照（见 §7.3）；`last_seen_at` 仅作观察证据，不再是 current 判定的权威。
+- stale 判定基于 `last_success_run` 的完成时间：距今超过阈值即 stale。阈值默认为同步周期的 2 倍；手工来源使用显式阈值。
 - stale 价格仍可展示，但不得被标记为“当前已确认成本”。
-- UI 必须同时显示 `fetched_at`、`effective_at` 和来源名称。
+- UI 必须同时显示 `last_success_run` 完成时间、`last_seen_at`、`fetched_at`、`effective_at` 和来源名称。
 
 ### 8.4 调度
 
 - 复用现有 `SystemTask` 调度与 lease，不再新增独立 goroutine 调度器。
 - 新任务类型建议为 `upstream_price_sync`。
+- `SystemTask` 的锁与调度间隔都是 per-type 的（`SystemTaskLock` 以 type 为主键）。`upstream_price_sync` 作为单一任务类型以较短固定周期唤醒，任务内部按各来源的 `schedule_interval_seconds` 筛选到期来源执行；不为每个来源建立独立任务类型。
 - 默认关闭定时同步；管理员逐来源开启。
 - 首版最短间隔建议为 6 小时，避免公共价格接口限流。
 - 单次任务按来源串行或有限并发执行，设置总超时和单来源超时。
@@ -380,11 +476,13 @@ hash 与未过期 `preview_hash` 一致时才写入；不一致则要求重新 P
 对于能够在同一请求向量下计算的价格表达式：
 
 ```text
-销售额 S = Evaluate(active_sale_expr, usage) × group_ratio
-渠道成本 C = Evaluate(channel_cost_expr, usage)
+销售额 S = Project(active_sale_price, usage) × group_ratio
+渠道成本 C = Project(channel_cost_expr, usage)
 预估毛利额 = S - C
 预估毛利率 = (S - C) / S
 ```
+
+`Project` 表示 §9.3 定义的销售价投影；渠道成本表达式在同一 usage vector 下用 billingexpr 引擎求值。
 
 边界：
 
@@ -394,9 +492,28 @@ hash 与未过期 `preview_hash` 一致时才写入；不一致则要求重新 P
 - 参考标价不参与成本毛利；它用于比较销售策略。
 - 汇率、充值折扣、支付手续费、税和退款不在首版计算范围内。
 
-### 9.3 从目录提升为销售价
+### 9.3 销售价投影契约
 
-管理员可以选择一个 `vendor_list` 或 `curated_reference` 快照作为销售价候选。该动作必须：
+投影口径是“限定维度基准估算”：仅支持显式声明的 usage vector 维度，首版从文本 `p`、`c`、`cr`、`cc` 基线起步，把三种现有计费模式投影为同一 usage vector 下的 USD 金额：
+
+1. ratio 模式：按现有扣费实现，先把 `ModelRatio`（绝对系数）与各相对倍率（`CompletionRatio`、`CacheRatio` 等）作用于 usage vector，算出分组倍率前的加权 quota `weighted_quota_before_group`，再 `USD_before_group = weighted_quota_before_group / QuotaPerUnit`（`QuotaPerUnit` 是 USD→quota 的乘数，投影回 USD 用除法）。usage vector 未提供的维度不参与计算；`p` 的口径与 billingexpr 一致——`p` 为未单独计价的输入部分，`cr`/`cc` 单独提供时不重复计入 `p`。
+2. 按次 `ModelPrice`：视同 `per_call_v1` 等值金额。
+3. tiered expression：投影必须基于中和 request rules 后的基础表达式求值。用现有 `RunExpr` 加空请求不能实现中和：`header("x") == ""` 之类条件在空请求上可能为真，`hour`、`weekday` 等时间函数仍按当前时间真实求值。因此 Phase 2 需要为 billingexpr 增加“仅求基础表达式 / 将 instrument 过的 request-rule 因子强制为 1”的增量 API（编译器已对 request-probe 因子做 instrument，可复用该信息）。fail closed 的判定不以 `|||` 字符串为准——数据库中保存的最终表达式是普通乘法形式，不含 `|||` 分隔符。服务端对已编译 AST 做分析：只要表达式引用任一 request probe（`param`、`header`、`hour`、`minute`、`weekday`、`month`、`day`）且无法安全中和，compare 即 fail closed，标注“含请求规则，无法投影”。Phase 2 增量 API 落地后，仅对无法安全中和的表达式 fail closed，可安全中和的表达式正常投影。
+
+以下因素明确排除、不参与投影：
+
+- 特殊分组倍率（userGroup + usingGroup 组合倍率）。
+- 请求级 `BillingRatios`（fixed price 也会被其调整）。
+- tool surcharge。
+- `OtherRatios`。
+- 图片/音频独立价。
+- 上游 usage semantic 差异。
+
+该投影只服务目录对比与预估毛利，不声称与在线扣费完整等价，也不改变任何在线扣费路径。若需要精确等价，属于后续从现有结算路径抽取纯投影函数的独立工作。
+
+### 9.4 从目录提升为销售价
+
+管理员可以选择一个 `vendor_list` 或 `curated_reference` 快照作为销售价候选（首版实际可接入的候选来源仅 `curated_reference`，见 §6.3 与 §17）。该动作必须：
 
 1. 显示来源权威等级和新鲜度。
 2. 显示当前销售价与候选价的逐字段/逐阶梯 diff。
@@ -413,7 +530,7 @@ Phase 3 实施时不能照搬当前前端逐个 option 顺序写入的非原子�
 
 ## 10. 管理 API 草案
 
-所有接口仅管理员可用。命名可在实现评审时调整，但职责必须保持分离。
+仓库权限区分 AdminAuth 与 RootAuth；现有 option 更新与 ratio_sync 接口均为 RootAuth。本方案所有接口逐接口标注为 RootAuth（root-only），首版不做成本只读委派。命名可在实现评审时调整，但职责必须保持分离。
 
 ### 10.1 来源管理
 
@@ -423,7 +540,7 @@ POST   /api/upstream-price-sources
 PUT    /api/upstream-price-sources/:id
 ```
 
-首版不提供硬删除；使用 `enabled=false`。
+三个接口均为 RootAuth。首版不提供硬删除；使用 `enabled=false`。
 
 ### 10.2 同步
 
@@ -432,7 +549,7 @@ POST /api/upstream-price-sources/:id/preview
 POST /api/upstream-price-sources/:id/sync
 ```
 
-`sync` 请求必须携带 preview 返回的短期 `preview_hash`，防止确认后来源内容已变化。
+两个接口均为 RootAuth。`sync` 请求必须携带 preview 返回的短期 `preview_hash`，防止确认后来源内容已变化。orphan 来源允许 `preview`（诊断用途）；`sync` 一律拒绝。
 
 ### 10.3 查询与比较
 
@@ -442,7 +559,7 @@ GET /api/upstream-prices/history
 POST /api/upstream-prices/compare
 ```
 
-`compare` 接收模型、分组和 usage vector，返回各渠道成本、当前售价和预估毛利，不写状态。
+三个接口均为 RootAuth。`compare` 接收模型、分组和 usage vector，返回各渠道成本、当前售价和预估毛利（投影口径与 fail closed 规则见 §9.3），不写状态。
 
 ### 10.4 销售价候选
 
@@ -450,7 +567,7 @@ POST /api/upstream-prices/compare
 POST /api/upstream-prices/sale-candidate
 ```
 
-该接口只生成现有销售配置的变更预览。真正应用继续走现有系统 option 更新入口，并保留现有冲突确认。
+该接口为 RootAuth，只生成现有销售配置的变更预览。真正应用通过 Phase 3 新增的服务端原子 apply/CAS 契约写入现有 option 权威（见 §9.4），并保留冲突确认；不复用现有前端逐 option 顺序写入路径——该路径无事务无回滚，部分失败会静默半写。
 
 ## 11. 管理界面
 
@@ -460,9 +577,9 @@ POST /api/upstream-prices/sale-candidate
 
 用于抓取和管理观察值：
 
-- 来源名称、角色、范围和关联渠道。
-- 最近成功/失败时间、新鲜度和覆盖模型数。
-- 手动 Preview、同步和调度开关。
+- 来源名称、角色、范围和关联渠道；关联渠道已删除的来源明示 orphaned。
+- 最近成功/失败 run、新鲜度和覆盖模型数。
+- 手动 Preview、同步和调度开关；orphan 来源仅保留 Preview，同步与调度入口禁用。
 - 不出现“直接应用为售价”的默认批量按钮。
 
 ### 11.2 价格比较
@@ -470,11 +587,11 @@ POST /api/upstream-prices/sale-candidate
 模型级展示：
 
 - 当前销售基础价。
-- 厂商官方标价。
+- 厂商官方标价（首版无 `vendor_list` 来源，该列为空）。
 - 第三方参考价。
 - 各渠道当前成本。
 - 最低/最高成本、普通分组预估售价和最差毛利。
-- stale、来源冲突、成本倒挂和缺失价格状态。
+- stale、missing、orphaned、canonical 映射冲突和成本倒挂状态。
 
 ### 11.3 销售价管理
 
@@ -482,26 +599,26 @@ POST /api/upstream-prices/sale-candidate
 
 ## 12. 安全与权限
 
-- 所有来源管理、同步、成本查询和毛利查询接口要求系统管理员权限。
+- 仓库区分 AdminAuth 与 RootAuth，现有 option 与 ratio_sync 均为 RootAuth；本方案所有接口（来源管理、preview、sync、目录查询、比较）均为 RootAuth（root-only），首版不做成本只读委派。
 - 普通用户定价 API 不暴露渠道成本、合同价、来源账号或毛利。
 - `supplier_cost` 永远不进入公开 `/api/pricing` 或 ratio API。
 - 后台定时抓取只允许已注册 adapter 的 canonical endpoint。
+- 抓取 HTTP client 禁止重定向（`CheckRedirect` 直接拒绝），设置连接/响应/总超时与解压后响应体大小上限，超限显式失败；不得复用现有 ratio_sync 的 client 构建模式（其未设置 `CheckRedirect`）。
 - 不允许从 PriceSource settings 提供任意 scheme/host。
 - 对确需认证的未来 adapter，只从现有安全渠道配置读取凭证，不在 DTO、数据库快照或日志中复制。
 - HTTP 错误只记录状态、adapter、source ID 和脱敏摘要。
-- Preview hash 必须绑定 source ID、规范化结果和过期时间。
+- Preview token 的 HMAC claim：claim 版本、source ID、`config_revision`、`base_run_id`、preview DTO 摘要、验证与门禁配置版本、过期时间；Commit 用 token 内的 `config_revision` 与 `base_run_id` 做 CAS，禁止客户端另行传入或覆盖（见 §8.1）。
 - 成本数据属于管理员敏感运营信息，审计日志中的明细应放在 `admin_info` 下。
 
 ## 13. 可观测性与告警
 
-每次同步至少记录：
+每次同步产生一条 `PriceSyncRun` 与逐模型 run item（见 §7.3），并至少记录：
 
-- source ID、adapter key 和 run ID。
-- 抓取耗时、HTTP 状态和响应大小。
-- 发现模型数、有效数、跳过数、变化数和覆盖率。
-- 新增快照数和幂等命中数。
+- source ID、adapter key 和 run ID（run 持久化 `adapter_key` 与非秘密 `source_config_digest`）。
+- 抓取耗时、HTTP 状态和响应大小（run 持久化 `duration_ms`、`http_status`、`response_bytes`）。
+- 发现、有效、unsupported、missing、新增快照与幂等命中计数，以及覆盖率变化。
 - stale 数、无法映射模型数和解析 warning 分类。
-- preview hash 和 commit hash，不记录价格源凭证。
+- preview token 只记录 token ID 或不可逆摘要，不记录可重放的原始 token；不记录价格源凭证。
 
 建议告警：
 
@@ -516,6 +633,7 @@ POST /api/upstream-prices/sale-candidate
 - 当前快照长期保留。
 - 历史快照首版默认保留 180 天，保留策略由后台任务按明确 manifest 清理。
 - 合同价来源可配置更长保留期。
+- 保留策略同样覆盖 `PriceSyncRun` 与 `PriceSyncRunItem`：历史 run 及其条目按同一保留期清理，各来源 `last_success_run_id` 指向的 run 及其条目不清理。
 - 清理只删除已经被更新快照覆盖且超过保留期的历史记录，不删除来源、当前快照或审计记录。
 - 实施清理前需单独设计跨数据库安全删除与批次边界；不属于首版同步 PR。
 
@@ -574,16 +692,16 @@ POST /api/upstream-prices/sale-candidate
 
 ## 17. 分阶段交付
 
-### Phase 0：Spec 与来源验证
+### Phase 0：Spec 与来源验证（已完成）
 
-- 评审本 Spec。
-- 用 Vercel 当前响应验证归一化契约。
-- 确认 Vercel 公开价格的真实 scope，是 public gateway price 还是账号实际结算价。
-- 确认首版需要展示的官方标价来源；没有权威机器源时允许人工销售价继续作为权威。
+- 已完成一轮内部设计评审与需求裁决。
+- 已用 Vercel 当前响应验证归一化契约：实测约 358 个模型、约 24 种 pricing 键，首版归一化范围据此确定（见 §6.2）。
+- Vercel 公开价格 scope 已确认：目录价即 gateway 对所有客户统一的实际收费价，管理员账号无额外折扣，`scope = public` 且可作为真实渠道成本（见 §2.1）。
+- 官方标价来源已裁决：首版不做 `vendor_list`；basellm / models.dev 以 `curated_reference` 角色在 Phase 2 接入并在 UI 标注非官方；人工维护的销售价继续作为权威。
 
 ### Phase 1：只读价格目录
 
-- PriceSource / PriceSnapshot 模型和跨数据库迁移。
+- PriceSource / PriceSnapshot / PriceSyncRun / PriceSyncRunItem 模型和跨数据库迁移。
 - adapter registry 和 Vercel 首适配器。
 - 手动 Preview / Sync。
 - 当前成本查询和新鲜度状态。
@@ -594,11 +712,12 @@ POST /api/upstream-prices/sale-candidate
 - 管理后台价格源目录和价格比较页面。
 - 复用 SystemTask 的定时同步，默认关闭。
 - 成本倒挂和覆盖率告警。
-- vendor list / curated reference 适配器。
+- billingexpr 基础表达式投影增量 API（request rules 中和，见 §9.3）。
+- curated reference 适配器（basellm / models.dev，UI 标注非官方）。
 
 ### Phase 3：显式销售价候选
 
-- 从 vendor list / curated reference 生成销售价 diff。
+- 从 curated_reference 生成销售价 diff。
 - 管理员确认后写入现有销售配置。
 - 销售价写后 readback 和审计。
 - supplier cost 的二次风险提示。
@@ -618,6 +737,9 @@ POST /api/upstream-prices/sale-candidate
 - 金额单位、十进制字符串和 canonical fingerprint。
 - flat、长上下文、cache read、per-call 表达式。
 - tier 缺失、重叠、阈值不一致和负数/NaN/Inf 拒绝。
+- tier 边界开闭语义测试向量：`[min, max)` 半开区间，`200001` 阈值映射为 `len <= 200000`。
+- `varies_by_provider` 标注从观察值 metadata 到目录查询/UI 状态的传导。
+- 统一模型名映射：默认剥离一层 `provider/` 前缀、显式映射表覆盖、映射失败保留原名并标记 unmapped。
 - model mapping 前后名称同时保留。
 - stale 和覆盖率下降判断。
 - 毛利计算的零售价、成本倒挂和多渠道最差值。
@@ -626,9 +748,13 @@ POST /api/upstream-prices/sale-candidate
 
 - SQLite 实际 AutoMigrate、插入、幂等和 latest 查询。
 - MySQL/PostgreSQL SQL 生成或配置环境契约测试。
-- 同一快照重复同步不新增记录。
+- 同一快照重复同步不新增记录，但更新 `last_seen_at` 与 `last_seen_run_id`。
+- 价格 A→B→A 振荡后，当前价按 run 语义（`last_seen_run_id` 对齐 `last_success_run_id`）正确回到 A。
+- `fingerprint` 唯一键长度与 collation 行为在三种数据库上由迁移测试覆盖。
 - 来源禁用后历史快照仍可查询。
-- 渠道删除/禁用不级联删除快照。
+- orphan 行为：渠道删除后来源标记 orphaned、Preview 仍可用于诊断、手动 Commit 与定时调度均被拒绝、历史快照保留。
+- 三库并发 commit 行为：MySQL/PostgreSQL 经行锁串行化；SQLite 无行锁分支下并发冲突使事务失败并完整 rollback，要求重新 Preview/重试。
+- 角色与渠道组合约束由 service 层校验：`supplier_cost` 必须关联存在且启用的渠道；参考源不得关联渠道。
 
 ### 18.3 计费隔离回归
 
@@ -644,15 +770,15 @@ POST /api/upstream-prices/sale-candidate
 
 - 请求计费结果不因价格目录存在而改变。
 - 普通 `/api/pricing` 不返回成本字段。
-- 非管理员无法访问成本 API。
+- 非 root 用户（含普通管理员）无法访问成本 API；接口为 RootAuth。
 
 ### 18.4 端到端测试
 
-- Vercel Preview 展示新增和变化但不落库。
-- Vercel Sync 只新增快照。
-- 定时任务关闭时不自动创建 sync run。
-- stale 来源和成本倒挂在 UI 明确标识。
-- 选择官方参考价生成销售价候选时，应用前必须确认；取消不写入。
+- Phase 1：Vercel Preview 展示新增和变化但不落库。
+- Phase 1：Vercel Sync 新增快照并产生 `PriceSyncRun` 与 run item 明细；current/missing/stale/orphaned 状态正确。
+- Phase 2：定时任务关闭时不自动创建 sync run。
+- Phase 2：stale 来源和成本倒挂在 UI 明确标识。
+- Phase 3：选择参考价生成销售价候选时，应用前必须确认；取消不写入。
 
 ## 19. 上线与回滚
 
@@ -689,29 +815,91 @@ POST /api/upstream-prices/sale-candidate
 
 ## 20. 验收标准
 
-首版完成需同时满足：
+按阶段分别验收。
 
-- [ ] Vercel 作为 adapter，而不是 controller 中的业务特例。
-- [ ] PriceSource 和 PriceSnapshot 不包含供应商专属字段。
-- [ ] Vercel flat 与长上下文价格能归一化并保留来源证据。
-- [ ] 手动/自动成本同步均不修改任何销售计费配置。
-- [ ] 普通用户和公开 pricing API 看不到成本。
-- [ ] 管理员能看到成本、当前售价、新鲜度和最差预估毛利。
-- [ ] 多渠道同模型可以保留不同成本。
-- [ ] 来源失败、缺失模型和 stale 均 fail closed。
-- [ ] SQLite、MySQL、PostgreSQL 行为一致。
-- [ ] 定时同步默认关闭，并复用 SystemTask lease。
+### 20.1 Phase 1 验收
+
+- [ ] SQLite、MySQL、PostgreSQL 三库 schema 与迁移行为一致（含 `fingerprint` 唯一键）。
+- [ ] 来源管理 API 可用且为 RootAuth；角色与渠道组合约束由 service 层校验生效。
+- [ ] Vercel 以 adapter 形式提供 Preview/Commit：flat 与长上下文归一化、`PriceSyncRun` 与 run item 记录、指纹幂等，不在 controller 中形成供应商特例，模型不含供应商专属字段。
+- [ ] current / missing / stale / orphaned 状态按 run/run item 语义正确：current 仅取 `status = valid` 条目；unsupported/rejected 不判为 missing。
+- [ ] 计费隔离回归通过：同步前后销售配置逐字节相同，请求计费不变。
+- [ ] 权限隔离：全部接口 root-only；普通用户和公开 pricing API 看不到成本。
 - [ ] `bowen/vercel-price-sync` 未被直接合并或部署。
+
+### 20.2 Phase 2 验收
+
+- [ ] 定时同步复用 SystemTask lease，默认关闭，无重叠执行与不可控重试。
+- [ ] 价格源目录与价格比较页面，含 varies_by_provider、orphaned、canonical conflict 标注。
+- [ ] 毛利投影按 §9.3 口径执行；对引用 request probe 且无法安全中和的表达式按 AST 判定 fail closed。
+- [ ] billingexpr 基础表达式投影增量 API 落地。
+- [ ] 成本倒挂与覆盖率告警生效；来源失败、缺失模型和 stale 均 fail closed。
+- [ ] curated_reference 适配器（basellm / models.dev）接入并在 UI 标注非官方。
+- [ ] 多渠道同模型可以保留并展示不同成本。
+
+### 20.3 Phase 3 验收
+
+- [ ] 销售价候选 diff 与管理员确认流程完整；取消不写入。
+- [ ] 服务端原子 apply/CAS 契约写入现有 option 权威；部分写入不得报告为成功。
+- [ ] 写后 readback 与审计记录。
+- [ ] `supplier_cost` 提升为销售价时二次风险提示。
 
 ## 21. 待确认问题
 
 以下问题会影响实现，但不改变“成本与售价分离”的结论：
 
-1. Vercel `/v1/models` 返回的是公开 gateway 价格，还是当前账号最终结算价格？若只是公开价格，`scope` 必须是 `public`，不能称为实际采购成本。
-2. 哪个来源被认可为厂商官方标价？当前“官方倍率预设”实际来自 basellm GitHub，models.dev 也是 curated reference，不应仅凭 UI 名称当作官方。
-3. 首版是否需要人工合同价来源，还是只支持机器接口？
-4. 销售价比较默认使用哪个分组：`default`，还是管理员可选择的分组？
-5. 历史价格保留期和成本信息的管理员可见范围是否需要进一步收紧？
-6. 成本倒挂告警只在后台展示，还是需要接入现有通知渠道？
+1. 已裁决：Vercel `/v1/models` 返回的是 gateway 对所有客户统一的实际收费价（实测对比加管理员确认账号无额外折扣），公开价即实际成本；`scope = public` 成立（见 §2.1）。
+2. 已裁决：首版不做 `vendor_list`；basellm、models.dev 等第三方整理价一律为 `curated_reference`，UI 必须标注非官方（见 §6.3）。
+3. 已裁决：人工合同价来源不进首版，后续独立立项。
+4. 保留（Phase 2 前需确认，不阻塞 Phase 1）：销售价比较默认使用哪个分组：`default`，还是管理员可选择的分组？
+5. 保留（Phase 2 前需确认，不阻塞 Phase 1）：历史价格保留期和成本信息的管理员可见范围是否需要进一步收紧？
+6. 保留（Phase 2 前需确认，不阻塞 Phase 1）：成本倒挂告警只在后台展示，还是需要接入现有通知渠道？
 
-在上述问题得到确认前，可以实施 Phase 1 的只读价格目录，但不能启用“自动销售价更新”或宣称已经具备真实财务毛利。
+在问题 4–6 得到确认前，可以实施 Phase 1 的只读价格目录，但不能启用“自动销售价更新”或宣称已经具备真实财务毛利。
+
+## 22. 修订记录
+
+rev2（2026-08-28）：完成一轮内部设计评审与需求裁决后的修订。
+
+- 状态更新为 Draft rev2，待 Codex 复审。
+- §2.1 补充价格口径实证：Vercel 目录价即 gateway 实际收费价（sol 五折，luna/terra 一致），管理员确认无账号级折扣，`scope = public` 成立。
+- §4.3、§7.2、§8.3、§18：快照新增 `last_seen_at`，幂等命中仅更新该时间戳；当前价与 stale 判定改基于 `last_seen_at`。
+- §6.1：FormulaKind 仅在系数与表达式层面不可比，同一 usage vector 下求值为同币种金额后必须可比。
+- §6.2：补充实测规模与价格键面貌；归一化范围明确为 input/output/cache read/cache write 的 flat 与 tiers；tier 半开区间 `[min, max)` 语义；`varies_by_provider` 打标；unsupported 与 missing 分开统计。
+- §6.3、§17、§21：首版不做 `vendor_list`；basellm / models.dev 以 `curated_reference` 在 Phase 2 接入并标注非官方；人工合同价不进首版；Phase 0 标记完成。
+- §7.2：`fingerprint` 列 MySQL collation 建议与三库唯一键长度迁移测试要求。
+- §7.4：新增统一模型名映射规则。
+- §8.1：补充 `preview_hash` HMAC 实现契约与进程重启/多实例限制。
+- §8.4：明确 `upstream_price_sync` 为单一任务类型，任务内部按来源 `schedule_interval_seconds` 筛选执行。
+- §9.3：新增销售价投影契约（原 §9.3 顺延为 §9.4）。
+- §10.4：真正应用改为经服务端原子 apply/CAS 契约写入，不复用前端逐 option 顺序写入路径。
+- §5.1：DTO 放根模块 `dto/`，不进入 `relaykit/dto`。
+- §18：补充 last_seen_at 幂等/振荡、tier 边界、varies_by_provider 传导与统一模型名映射测试。
+
+rev3（2026-08-28）：Codex 第一轮评审（1 BLOCKER / 9 MAJOR / 3 MINOR）修复，全部采纳；其中渠道删除采用 orphan 方案替代删除路径挂钩。
+
+- §7.3 新增 `PriceSyncRun` 同步批次模型；当前价/missing/新鲜度语义改以 run 为权威，排序权威为单调递增 run id（仓库时间戳秒级，不得作排序权威）；commit 事务内以 `lockForUpdate(tx)` 行锁实现 per-source 串行化（原 §7.3/§7.4 顺延为 §7.4/§7.5）。
+- §7.2：快照增加 `role` / `scope` / `provider` / `mapping_status` / `last_seen_run_id`，写入后即历史权威；`source_revision` 移入 PriceSyncRun；指纹扩展为版本化 canonical payload 全部语义字段；canonical 冲突返回全部候选并标 conflict。
+- §7.1：来源增加 `config_revision` 与 `last_success_run_id`；来源 role/scope 只是新快照的默认声明。
+- §4.3 不变量 7 收窄：解析/归一化/持久化/指纹用十进制字符串，表达式求值用有界 float64 并拒绝 NaN/Inf，不声称全链路定点。
+- §9.3：tiered_expr 投影改为基于中和 request rules 的基础表达式；说明 RunExpr 加空请求不可行；增量 API 落地前 compare 对含 request rules 表达式 fail closed。
+- §9.3：总口径降级为“限定维度基准估算”，逐项列出排除因素，不声称与在线扣费完整等价。
+- §8.1：preview token 绑定面扩展（config_revision、完整 preview DTO 摘要、门禁配置版本）；commit 事务内 CAS；§13 只记录 token ID 或不可逆摘要。
+- §6.2、§12：抓取 HTTP client 禁止重定向、限时限量，不复用 ratio_sync client 构建模式。
+- §10、§12：所有接口逐接口标注 RootAuth（root-only），首版不做成本只读委派。
+- §7.1、§18.2：渠道删除改 orphan 检测方案，不挂钩现有删除路径。
+- §8.2：重试表述纠正——SystemTask 只提供 lease 与周期调度，重试/退避由 upstreamprice service 自行定义。
+- §4.2：无法证明适用范围一律标 `unknown`；`public` 必须有公开一致证据。
+- §20 拆分为 Phase 1/2/3 三份验收清单；§18.4 逐条标注所属 Phase。
+
+rev4（2026-08-28）：Codex 第二轮复审（4 MAJOR / 4 MINOR）修复，全部采纳；文档进入 Phase 1 实施基线。
+
+- §7.3 新增 `PriceSyncRunItem` 条目明细（run_id + source_model_name + status + snapshot_id + warning_code）；current 只取 last_success_run 中 valid 条目，missing 只指上游确实未返回的历史模型，unsupported/rejected 不判为 missing（§8.2、§8.3、§20.1 同步修正；§14 保留策略覆盖 run 与 run item）。
+- §6.1：定义唯一 role/scope 权威算法——adapter 声明允许集合，Observation 未给值用来源默认声明，超范围拒绝（rejected），禁止静默覆盖（§7.1、§7.2 引用对齐）。
+- §9.3：fail closed 判定改为服务端编译 AST 分析（引用 request probe 且无法安全中和），不再以 `|||` 字符串为判定；增量 API 落地后可安全中和者正常投影（§20.2 措辞同步）。
+- §8.1、§12：preview token HMAC claim 明确为 claim 版本 + source ID + config_revision + base_run_id + preview DTO 摘要 + 门禁配置版本 + 过期时间；Commit 用 token 内的 base_run_id 做 CAS，禁止客户端另行传入或覆盖。
+- §7.3、§8.1、§18.2：写明 `lockForUpdate(tx)` SQLite 分支不加行锁、依赖冲突事务失败；任何一步 GORM 错误整次 commit rollback；三库并发行为测试列入 §18.2。
+- §7.1、§10.2、§11.1、§18.2：orphan 来源允许 Preview（诊断用途），手动 Commit 与定时执行一律拒绝。
+- §7.2 快照增加 `fingerprint_version`（进入 canonical payload）；§7.3 run 增加 `adapter_key`、`source_config_digest`、`http_status`、`response_bytes`、`duration_ms` 与 `rejected_count`；§13 措辞对齐持久化承载。
+- §9.3 ratio 分支写出精确公式：`USD_before_group = weighted_quota_before_group / QuotaPerUnit`（QuotaPerUnit 为 USD→quota 乘数，投影回 USD 用除法）；`p` 口径与 billingexpr 一致，cr/cc 单独提供时不重复计入 p。
+- 状态更新为 Draft rev4，进入 Phase 1 实施。
