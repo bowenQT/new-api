@@ -7,9 +7,10 @@ dedicated Docker network, so no public HTTP port is required on the Droplet.
 
 ## Start
 
-Create `deploy/sgp1/.env` from `.env.example`, replace every secret with a
-unique random value, set the exact HTTPS origins, add the remotely managed
-Cloudflare Tunnel token, then run from the repository root:
+Create `deploy/sgp1/.env` from `.env.example`, set `NEW_API_IMAGE_TAG` to the
+full 40-character SHA of the reviewed commit, replace every secret with a unique
+random value, set the exact HTTPS origins, add the remotely managed Cloudflare
+Tunnel token, then run from the repository root:
 
 ```bash
 docker compose --env-file deploy/sgp1/.env \
@@ -25,7 +26,7 @@ curl --fail --silent http://127.0.0.1:3000/api/status
 For local diagnostics, access the UI through an SSH tunnel:
 
 ```bash
-ssh -L 3000:127.0.0.1:3000 codex-silent-forge-ef4f
+ssh -L 3000:127.0.0.1:3000 operator@droplet-host
 ```
 
 Then open `http://127.0.0.1:3000`. Do not publish port 3000 directly on the
@@ -81,3 +82,9 @@ the operations contract.
   printf 'backup=%s\nchecksum=%s\n' "$backup_path" "$checksum_path"
 )
 ```
+
+The `pg_restore --list` check above verifies that the archive can be read; it is
+not a restore rehearsal. Before deployment, restore the dump into an explicitly
+identified, isolated disposable PostgreSQL instance and record the integrity and
+minimum read checks required by the
+[SGP1 operations contract](../../docs/downstream/sgp1-operations.md).
