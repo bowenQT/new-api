@@ -431,6 +431,20 @@ func CommitPriceSync(commit *PriceSyncCommit) (*PriceSyncRun, error) {
 	return &run, nil
 }
 
+// RecordPriceSourceFailure stamps a source's failure time and summary for an
+// attempt that produced no run at all — a preflight refusal, an unavailable
+// adapter, or a commit transaction that never wrote its run. The scheduler's
+// due check reads last_error_at, so an attempt that leaves no run must still
+// leave a timestamp or the source retries on every wake (spec §8.4).
+func RecordPriceSourceFailure(sourceId int, errorSummary string) error {
+	now := common.GetTimestamp()
+	return DB.Model(&PriceSource{}).Where("id = ?", sourceId).Updates(map[string]interface{}{
+		"last_error_at":      now,
+		"last_error_summary": truncateSummary(errorSummary),
+		"updated_time":       now,
+	}).Error
+}
+
 // upsertPriceSnapshot implements fingerprint idempotency: an existing
 // (source_id, source_model_name, fingerprint) row only gets its observation
 // evidence fields refreshed; every other field stays immutable (spec §4.3).

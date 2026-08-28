@@ -158,6 +158,40 @@ func TestScheduledSyncReportsRefusedRunAsFailure(t *testing.T) {
 	}
 }
 
+// TestScheduledSyncBacksOffAfterPreflightFailure is the §8.4 backoff contract:
+// a failure that never reaches the adapter — here a disabled supplier channel —
+// still stamps last_error_at, so the source waits a full interval instead of
+// retrying on every 15-minute wake.
+func TestScheduledSyncBacksOffAfterPreflightFailure(t *testing.T) {
+	payload := pricedCatalogPayload(3)
+	db, source := setupScheduledFixture(t, &payload)
+	require.NotNil(t, source.ChannelId)
+	require.NoError(t, db.Model(&model.Channel{}).Where("id = ?", *source.ChannelId).
+		Update("status", common.ChannelStatusManuallyDisabled).Error)
+
+	summary, err := upstreamprice.RunScheduledSync(context.Background(), nil)
+	require.Error(t, err)
+	assert.Equal(t, 1, summary.Due)
+	assert.Equal(t, 1, summary.Executed)
+	assert.Equal(t, 1, summary.Failed)
+
+	failed, err := model.GetPriceSourceById(source.Id)
+	require.NoError(t, err)
+	require.NotNil(t, failed.LastErrorAt)
+	assert.Contains(t, failed.LastErrorSummary, "channel is disabled")
+	assert.Nil(t, failed.LastSuccessRunId)
+
+	// No run was recorded, but the attempt still backs the source off.
+	runs, err := model.GetRecentPriceSyncRuns(source.Id, 1)
+	require.NoError(t, err)
+	assert.Empty(t, runs)
+
+	second, err := upstreamprice.RunScheduledSync(context.Background(), nil)
+	require.NoError(t, err)
+	assert.Equal(t, 0, second.Due)
+	assert.Equal(t, 0, second.Executed)
+}
+
 // TestScheduledSyncRefusesOrphanedSource pins spec §7.1: an orphaned source may
 // still preview for diagnostics, but the scheduled path refuses to execute it.
 func TestScheduledSyncRefusesOrphanedSource(t *testing.T) {

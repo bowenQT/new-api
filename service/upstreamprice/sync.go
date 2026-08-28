@@ -696,15 +696,41 @@ func SyncPriceSource(ctx context.Context, sourceId int, previewToken string) (*d
 // normalization, validation, and coverage/change gates are identical, and the
 // same CAS-guarded commit transaction writes the result. It never touches sale
 // pricing.
+//
+// Every failure on this path stamps last_error_at, including the ones that
+// produce no run: a refused preflight, an unusable adapter or settings, a
+// base-state read error, and a commit transaction that rolled back. The
+// scheduler backs off by the source's own interval from the last attempt, so a
+// failure that left no timestamp would make the source retry on every wake
+// (spec §8.4). The manual preview/commit path deliberately keeps its existing
+// semantics and stamps nothing for a refusal that never ran.
 func SyncPriceSourceWithoutPreview(ctx context.Context, source *model.PriceSource) (*dto.UpstreamPriceSyncResponse, error) {
 	if err := checkSourceRunnableForCommit(source); err != nil {
-		return nil, err
+		return nil, recordScheduledAttemptFailure(source, err)
 	}
 	plan, planErr := buildSyncPlan(ctx, source)
 	if planErr != nil {
+		if plan == nil {
+			return nil, recordScheduledAttemptFailure(source, planErr)
+		}
 		return nil, recordSyncPlanFailure(source, plan, planErr)
 	}
-	return commitSyncPlan(source, plan, plan.Source.ConfigRevision, plan.BaseRunId)
+	response, commitErr := commitSyncPlan(source, plan, plan.Source.ConfigRevision, plan.BaseRunId)
+	if commitErr != nil {
+		return nil, recordScheduledAttemptFailure(source, commitErr)
+	}
+	return response, nil
+}
+
+// recordScheduledAttemptFailure stamps a scheduled attempt that never recorded
+// a run onto the source and returns the original cause. A failure to write the
+// stamp is logged, never substituted for the cause: the caller must still see
+// why the sync failed.
+func recordScheduledAttemptFailure(source *model.PriceSource, cause error) error {
+	if err := model.RecordPriceSourceFailure(source.Id, cause.Error()); err != nil {
+		common.SysError(fmt.Sprintf("upstream price source %d failure timestamp could not be recorded: %v", source.Id, err))
+	}
+	return cause
 }
 
 // checkSourceRunnableForCommit is the pre-fetch gate shared by the manual and

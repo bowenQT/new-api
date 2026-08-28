@@ -472,7 +472,7 @@ Phase 2 实施口径：
 - 部署级开关为环境变量 `UPSTREAM_PRICE_SYNC_TASK_ENABLED`，默认 `false`；任务 `Enabled()` 同时要求至少存在一个 `enabled` 且 `schedule_enabled` 的来源，未配置的部署不会产生任何任务行。
 - 唤醒周期 15 分钟，远短于来源级 6 小时下限，使来源贴近自身间隔执行。
 - 6 小时下限在写入校验（启用调度时 `schedule_interval_seconds` 必须 ≥ 21600）与到期筛选两处同时强制。
-- 到期基准取最近一次尝试（成功或失败）时间，失败来源退避一个完整间隔，不在下次唤醒重试。
+- 到期基准取最近一次尝试（成功或失败）时间，失败来源退避一个完整间隔，不在下次唤醒重试。调度路径上的**所有**失败都写 `last_error_at` 与 `last_error_summary`，包括不产生 run 的失败（渠道禁用等 preflight 拒绝、adapter 不可用、base state 读失败、commit 事务回滚），否则这些来源会绕过退避、每次唤醒重试。手工 preview/commit 路径语义不变，校验失败不写时间戳。
 - 调度结果分类以 run status 为准，不以「是否返回 error」为准：`failed` run（零有效观测、覆盖率门禁拒绝）不返回 error 但没有提交任何观测，一律计入 `failed`；`partial` 已提交有效观测，计入 `succeeded` 并在 summary 中单列 `partial` 计数。任一来源 `failed` 或整次任务超时（`timed_out=true`），`upstream_price_sync` 的 SystemTask 一律收尾为 `failed`，summary 仍作为任务 result 记录；orphan 跳过不算失败。
 - 单来源超时 3 分钟，整次任务超时 30 分钟；orphan 来源拒绝执行，Preview 仍可用于诊断。
 - 无人工 Preview，但复用同一条 commit 路径：同样的抓取、归一化、验证、覆盖率与变化门禁，以及同一个 CAS 事务。
