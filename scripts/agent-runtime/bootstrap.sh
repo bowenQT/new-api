@@ -149,6 +149,10 @@ if [[ "$mode" == "apply" ]]; then
   git config --local rerere.enabled true
   git config --local rerere.autoupdate false
 
+  if git show-ref --verify --quiet refs/heads/main; then
+    git config --local branch.main.remote origin
+    git config --local branch.main.merge refs/heads/main
+  fi
   if git show-ref --verify --quiet refs/heads/downstream/main &&
     git show-ref --verify --quiet refs/remotes/origin/downstream/main; then
     git config --local branch.downstream/main.remote origin
@@ -156,7 +160,7 @@ if [[ "$mode" == "apply" ]]; then
   fi
 fi
 
-check_config() {
+check_local_config() {
   local key=$1
   local expected=$2
   local actual
@@ -168,16 +172,35 @@ check_config() {
   printf '%s=%s\n' "$key" "$actual"
 }
 
-check_config remote.upstream.pushurl DISABLED
-check_config remote.pushDefault origin
-check_config push.default simple
-check_config pull.ff only
-check_config fetch.prune false
-check_config rebase.autoStash false
-check_config merge.autoStash false
-check_config merge.conflictStyle zdiff3
-check_config rerere.enabled true
-check_config rerere.autoupdate false
+check_effective_config() {
+  local key=$1
+  local expected=$2
+  local actual
+  actual=$(git config --get "$key" 2>/dev/null || true)
+  if [[ "$actual" != "$expected" ]]; then
+    echo "ERROR: effective $key expected '$expected', found '${actual:-<unset>}'" >&2
+    return 1
+  fi
+  printf 'effective.%s=%s\n' "$key" "$actual"
+}
+
+required_configs=(
+  'remote.upstream.pushurl DISABLED'
+  'remote.pushDefault origin'
+  'push.default simple'
+  'pull.ff only'
+  'fetch.prune false'
+  'rebase.autoStash false'
+  'merge.autoStash false'
+  'merge.conflictStyle zdiff3'
+  'rerere.enabled true'
+  'rerere.autoupdate false'
+)
+for required_config in "${required_configs[@]}"; do
+  read -r key expected <<< "$required_config"
+  check_local_config "$key" "$expected"
+  check_effective_config "$key" "$expected"
+done
 
 effective_upstream_push=$(git remote get-url --push --all upstream 2>/dev/null || true)
 if [[ "$effective_upstream_push" != "DISABLED" ]]; then
@@ -185,16 +208,19 @@ if [[ "$effective_upstream_push" != "DISABLED" ]]; then
   exit 1
 fi
 
-main_remote=$(git config --local --get branch.main.remote 2>/dev/null || true)
-if [[ -n "$main_remote" && "$main_remote" != "origin" ]]; then
-  echo "ERROR: branch.main.remote must be origin, found $main_remote" >&2
-  exit 1
+if git show-ref --verify --quiet refs/heads/main; then
+  check_local_config branch.main.remote origin
+  check_effective_config branch.main.remote origin
+  check_local_config branch.main.merge refs/heads/main
+  check_effective_config branch.main.merge refs/heads/main
 fi
 
 if git show-ref --verify --quiet refs/heads/downstream/main &&
   git show-ref --verify --quiet refs/remotes/origin/downstream/main; then
-  check_config branch.downstream/main.remote origin
-  check_config branch.downstream/main.merge refs/heads/downstream/main
+  check_local_config branch.downstream/main.remote origin
+  check_effective_config branch.downstream/main.remote origin
+  check_local_config branch.downstream/main.merge refs/heads/downstream/main
+  check_effective_config branch.downstream/main.merge refs/heads/downstream/main
 fi
 
 printf 'repository=%s\n' "$repo_root"

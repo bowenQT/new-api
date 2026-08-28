@@ -116,7 +116,7 @@ git diff --name-only "$merge_base..$upstream_sha" | LC_ALL=C sort -u > "$upstrea
 comm -12 "$local_paths" "$upstream_paths" > "$overlap_paths"
 
 cat "$local_paths" "$upstream_paths" | LC_ALL=C sort -u |
-  grep -E '^(router/|controller/|service/|model/|relay/|relaykit/|middleware/|setting/|common/|dto/|types/|web/src/i18n/|Dockerfile$|docker-compose[^/]*\.yml$|deploy/|\.github/|AGENTS\.md$)' \
+  grep -E '^(router/|controller/|service/|model/|relay/|relaykit/|middleware/|setting/|common/|dto/|types/|constant/|pkg/|oauth/|i18n/|web/src/|Dockerfile$|docker-compose[^/]*\.yml$|deploy/|\.github/|AGENTS\.md$)' \
     > "$risk_paths" || true
 
 common_git_dir=$(git rev-parse --git-common-dir)

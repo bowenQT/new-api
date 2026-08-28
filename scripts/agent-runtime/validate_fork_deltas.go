@@ -60,7 +60,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	problems := validateForkDeltaLedger(ledger, repoRoot, func(commit string) error {
+	diffRange := *baseRef + "...HEAD"
+	changedPaths, deletedPathList, diffPathsErr := loadForkDeltaPaths(diffRange)
+	deletedPaths := make(map[string]struct{}, len(deletedPathList))
+	for _, path := range deletedPathList {
+		deletedPaths[path] = struct{}{}
+	}
+
+	problems := validateForkDeltaLedger(ledger, repoRoot, deletedPaths, func(commit string) error {
 		if _, err := gitOutput("cat-file", "-e", commit+"^{commit}"); err != nil {
 			return errors.New("commit is not available")
 		}
@@ -70,9 +77,8 @@ func main() {
 		return nil
 	})
 
-	changedPaths, err := gitLines("diff", "--name-only", *baseRef+"...HEAD")
-	if err != nil {
-		problems = append(problems, fmt.Sprintf("changed paths: %v", err))
+	if diffPathsErr != nil {
+		problems = append(problems, fmt.Sprintf("changed paths: %v", diffPathsErr))
 	} else {
 		problems = append(problems, validateChangedPathCoverage(ledger, changedPaths)...)
 	}
@@ -114,6 +120,7 @@ func readForkDeltaLedger(path string) (forkDeltaLedger, error) {
 func validateForkDeltaLedger(
 	ledger forkDeltaLedger,
 	repoRoot string,
+	deletedPaths map[string]struct{},
 	validateCommit func(string) error,
 ) []string {
 	var problems []string
@@ -163,7 +170,10 @@ func validateForkDeltaLedger(
 			seenPaths[path] = entry.ID
 			if entry.Status == "active" {
 				if _, err := os.Stat(filepath.Join(repoRoot, path)); err != nil {
-					problems = append(problems, label+".paths does not exist: "+path)
+					_, isDeleted := deletedPaths[path]
+					if !errors.Is(err, os.ErrNotExist) || !isDeleted {
+						problems = append(problems, label+".paths does not exist: "+path)
+					}
 				}
 			}
 		}
@@ -221,13 +231,26 @@ func gitOutput(args ...string) (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
-func gitLines(args ...string) ([]string, error) {
-	output, err := gitOutput(args...)
+func gitNullLines(args ...string) ([]string, error) {
+	output, err := exec.Command("git", args...).CombinedOutput()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
 	}
-	if output == "" {
+	if len(output) == 0 {
 		return nil, nil
 	}
-	return strings.Split(output, "\n"), nil
+	parts := strings.Split(string(output), "\x00")
+	return parts[:len(parts)-1], nil
+}
+
+func loadForkDeltaPaths(diffRange string) ([]string, []string, error) {
+	changedPaths, err := gitNullLines("diff", "--no-renames", "--name-only", "-z", diffRange)
+	if err != nil {
+		return nil, nil, err
+	}
+	deletedPaths, err := gitNullLines("diff", "--no-renames", "--diff-filter=D", "--name-only", "-z", diffRange)
+	if err != nil {
+		return nil, nil, err
+	}
+	return changedPaths, deletedPaths, nil
 }

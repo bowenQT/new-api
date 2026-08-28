@@ -133,6 +133,26 @@ git -C "$fixture_repo" update-ref refs/remotes/origin/downstream/main refs/heads
   scripts/agent-runtime/bootstrap.sh --apply >/dev/null
   scripts/agent-runtime/bootstrap.sh --check >/dev/null
 )
+if [[ "$(git -C "$fixture_repo" config --local --get branch.main.remote)" != "origin" ||
+  "$(git -C "$fixture_repo" config --local --get branch.main.merge)" != "refs/heads/main" ]]; then
+  echo "ERROR: bootstrap did not configure main to track origin/main" >&2
+  exit 1
+fi
+git -C "$fixture_repo" config --local branch.main.merge refs/heads/downstream/main
+expect_failure "branch.main.merge expected 'refs/heads/main'" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --apply >/dev/null
+
+git -C "$fixture_repo" config --local extensions.worktreeConfig true
+git -C "$fixture_repo" config --worktree push.default current
+expect_failure "effective push.default expected 'simple'" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --apply
+git -C "$fixture_repo" config --worktree --unset push.default
+git -C "$fixture_repo" config --worktree branch.main.merge refs/heads/downstream/main
+expect_failure "effective branch.main.merge expected 'refs/heads/main'" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --worktree --unset branch.main.merge
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check >/dev/null
 
 git -C "$fixture_repo" switch --quiet downstream/main
 expect_failure "edit mode requires a symbolic topic branch" \
@@ -148,7 +168,59 @@ printf 'placeholder\n' > "$fixture_repo/.env"
 expect_failure "ignored credential/data artifact" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/preflight.sh --mode edit
 rm -f "$fixture_repo/.env"
+printf 'placeholder\n' > "$fixture_repo/a b.pem"
+expect_failure "suspicious uncommitted credential/data artifact: a b.pem" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/preflight.sh --mode edit
+rm -f "$fixture_repo/a b.pem"
+printf 'placeholder\n' > "$fixture_repo/source key.pem"
+git -C "$fixture_repo" add -- 'source key.pem'
+git -C "$fixture_repo" commit --quiet -m sensitive-rename-fixture
+git -C "$fixture_repo" mv -- 'source key.pem' safe-renamed.txt
+expect_failure "suspicious uncommitted credential/data artifact: source key.pem" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/preflight.sh --mode edit
+git -C "$fixture_repo" mv -- safe-renamed.txt 'source key.pem'
 run_in_repo "$fixture_repo" scripts/agent-runtime/preflight.sh --mode edit >/dev/null
+
+mkdir -p \
+  "$fixture_repo/pkg/billingexpr" \
+  "$fixture_repo/oauth" \
+  "$fixture_repo/i18n" \
+  "$fixture_repo/constant" \
+  "$fixture_repo/web/src/routes" \
+  "$fixture_repo/docs"
+printf 'fixture\n' > "$fixture_repo/pkg/billingexpr/runtime-review.go"
+printf 'fixture\n' > "$fixture_repo/oauth/runtime-review.go"
+printf 'fixture\n' > "$fixture_repo/i18n/runtime-review.go"
+printf 'fixture\n' > "$fixture_repo/constant/runtime-review.go"
+printf 'fixture\n' > "$fixture_repo/web/src/routes/runtime-review.tsx"
+printf 'fixture\n' > "$fixture_repo/docs/ordinary.md"
+git -C "$fixture_repo" add -- \
+  pkg/billingexpr/runtime-review.go \
+  oauth/runtime-review.go \
+  i18n/runtime-review.go \
+  constant/runtime-review.go \
+  web/src/routes/runtime-review.tsx \
+  docs/ordinary.md
+git -C "$fixture_repo" commit --quiet -m high-risk-paths
+audit_output="$fixture_root/upstream-audit-output"
+run_in_repo "$fixture_repo" scripts/agent-runtime/upstream-audit.sh --no-fetch --target HEAD > "$audit_output"
+semantic_paths=$(awk '/^semantic_review_paths:$/ { capture = 1; next } capture { print }' "$audit_output")
+for high_risk_path in \
+  pkg/billingexpr/runtime-review.go \
+  oauth/runtime-review.go \
+  i18n/runtime-review.go \
+  constant/runtime-review.go \
+  web/src/routes/runtime-review.tsx; do
+  if ! grep -Fxq "$high_risk_path" <<< "$semantic_paths"; then
+    echo "ERROR: semantic review omitted high-risk path: $high_risk_path" >&2
+    exit 1
+  fi
+done
+if grep -Fxq 'docs/ordinary.md' <<< "$semantic_paths"; then
+  echo "ERROR: semantic review included an ordinary docs path" >&2
+  exit 1
+fi
+
 expect_failure "contains downstream-only history" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/preflight.sh --mode upstream-edit
 

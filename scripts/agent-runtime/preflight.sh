@@ -154,21 +154,43 @@ if [[ "$mode" != "bootstrap" && "$branch" == "downstream/main" && -n "$status" ]
   exit 1
 fi
 
-if [[ -n "$status" ]]; then
-  while IFS= read -r status_line; do
-    path=${status_line:3}
-    case "$path" in
-      *.pem | *.key | *.p12 | *.pfx | *.db | *.sqlite | *.sqlite3 | *.dump | *.sql | *.sql.gz | */.env | .env)
-        echo "ERROR: suspicious uncommitted credential/data artifact: $path" >&2
+is_sensitive_path() {
+  local candidate=$1
+  case "$candidate" in
+    *.pem | *.key | *.p12 | *.pfx | *.db | *.sqlite | *.sqlite3 | *.dump | *.sql | *.sql.gz | */.env | .env)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+while IFS= read -r -d '' status_record; do
+  status_code=${status_record:0:2}
+  path=${status_record:3}
+  if is_sensitive_path "$path"; then
+    echo "ERROR: suspicious uncommitted credential/data artifact: $path" >&2
+    exit 1
+  fi
+  case "$status_code" in
+    *R* | *C*)
+      IFS= read -r -d '' original_path || {
+        echo "ERROR: malformed Git status rename/copy record" >&2
         exit 1
-        ;;
-    esac
-  done <<< "$status"
-fi
+      }
+      if is_sensitive_path "$original_path"; then
+        echo "ERROR: suspicious uncommitted credential/data artifact: $original_path" >&2
+        exit 1
+      fi
+      ;;
+  esac
+done < <(git status --porcelain=v1 -z --untracked-files=all)
 
 is_allowed_sensitive_path() {
   local candidate=$1
   local allowed_path
+  if (( ${#allowed_sensitive_paths[@]} == 0 )); then
+    return 1
+  fi
   for allowed_path in "${allowed_sensitive_paths[@]}"; do
     if [[ "$candidate" == "$allowed_path" ]]; then
       return 0
