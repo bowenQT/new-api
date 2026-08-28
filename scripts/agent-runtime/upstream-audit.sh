@@ -111,12 +111,12 @@ upstream_paths="$tmp_dir/upstream-paths"
 overlap_paths="$tmp_dir/overlap-paths"
 risk_paths="$tmp_dir/risk-paths"
 merge_output="$tmp_dir/merge-output"
-git diff --name-only "$merge_base..$target_sha" | LC_ALL=C sort -u > "$local_paths"
-git diff --name-only "$merge_base..$upstream_sha" | LC_ALL=C sort -u > "$upstream_paths"
+git diff --no-renames --name-only "$merge_base..$target_sha" | LC_ALL=C sort -u > "$local_paths"
+git diff --no-renames --name-only "$merge_base..$upstream_sha" | LC_ALL=C sort -u > "$upstream_paths"
 comm -12 "$local_paths" "$upstream_paths" > "$overlap_paths"
 
 cat "$local_paths" "$upstream_paths" | LC_ALL=C sort -u |
-  grep -E '^(router/|controller/|service/|model/|relay/|relaykit/|middleware/|setting/|common/|dto/|types/|web/src/i18n/|Dockerfile$|docker-compose[^/]*\.yml$|deploy/|\.github/|AGENTS\.md$)' \
+  grep -E '^(router/|controller/|service/|model/|relay/|relaykit/|middleware/|setting/|common/|dto/|types/|constant/|pkg/|oauth/|i18n/|web/|Dockerfile$|docker-compose[^/]*\.yml$|deploy/|\.github/|AGENTS\.md$)' \
     > "$risk_paths" || true
 
 common_git_dir=$(git rev-parse --git-common-dir)

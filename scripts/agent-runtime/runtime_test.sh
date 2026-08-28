@@ -4,7 +4,11 @@ set -euo pipefail
 
 source_root=$(git rev-parse --show-toplevel)
 fixture_root=$(mktemp -d "${TMPDIR:-/tmp}/newapi-runtime-test.XXXXXX")
+named_user_include=''
 cleanup() {
+  if [[ -n "$named_user_include" ]]; then
+    rm -f -- "$named_user_include"
+  fi
   rm -rf "$fixture_root"
 }
 trap cleanup EXIT
@@ -71,7 +75,11 @@ run_in_repo() {
 init_fixture() {
   local repo_path=$1
   mkdir -p "$repo_path/scripts/agent-runtime"
+  mkdir -p "$repo_path/pkg/billingexpr"
   cp "$source_root/scripts/agent-runtime/bootstrap.sh" "$repo_path/scripts/agent-runtime/"
+  mkdir -p "$repo_path/scripts/agent-runtime/onbranch-overlap"
+  cp "$source_root/scripts/agent-runtime/onbranch-overlap/main.go" \
+    "$repo_path/scripts/agent-runtime/onbranch-overlap/"
   cp "$source_root/scripts/agent-runtime/preflight.sh" "$repo_path/scripts/agent-runtime/"
   cp "$source_root/scripts/agent-runtime/upstream-audit.sh" "$repo_path/scripts/agent-runtime/"
   chmod +x "$repo_path/scripts/agent-runtime/"*.sh
@@ -80,7 +88,8 @@ init_fixture() {
   git -C "$repo_path" config user.email runtime-test@example.invalid
   printf '.env\n' > "$repo_path/.gitignore"
   printf 'fixture\n' > "$repo_path/README.md"
-  git -C "$repo_path" add .gitignore README.md scripts/agent-runtime
+  printf 'fixture\n' > "$repo_path/pkg/billingexpr/rename-source.go"
+  git -C "$repo_path" add .gitignore README.md scripts/agent-runtime pkg/billingexpr/rename-source.go
   git -C "$repo_path" commit --quiet -m fixture
   git -C "$repo_path" branch -M main
   git -C "$repo_path" remote add origin https://github.com/bowenQT/new-api.git
@@ -133,8 +142,424 @@ git -C "$fixture_repo" update-ref refs/remotes/origin/downstream/main refs/heads
   scripts/agent-runtime/bootstrap.sh --apply >/dev/null
   scripts/agent-runtime/bootstrap.sh --check >/dev/null
 )
+if [[ "$(git -C "$fixture_repo" config --local --get branch.main.remote)" != "origin" ||
+  "$(git -C "$fixture_repo" config --local --get branch.main.merge)" != "refs/heads/main" ]]; then
+  echo "ERROR: bootstrap did not configure main to track origin/main" >&2
+  exit 1
+fi
+git -C "$fixture_repo" config --local branch.main.merge refs/heads/downstream/main
+expect_failure "branch.main.merge expected exactly one value 'refs/heads/main'" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --apply >/dev/null
+git -C "$fixture_repo" config --local remote.origin.url \
+  git@github.com:bowenQT/new-api.git
+for ssh_environment_key in GIT_SSH_COMMAND GIT_SSH; do
+  (
+    export "$ssh_environment_key=ssh -o HostName=evil.example"
+    expect_failure "$ssh_environment_key must be unset for SSH remotes" \
+      run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+  )
+done
+git -C "$fixture_repo" config --local remote.origin.url \
+  https://github.com/bowenQT/new-api.git
+(
+  export GIT_SSH_COMMAND='ssh -o HostName=unused.example'
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check >/dev/null
+)
+git -C "$fixture_repo" config --local --unset-all branch.main.merge
+git -C "$fixture_repo" config --local --add branch.main.merge refs/heads/downstream/main
+git -C "$fixture_repo" config --local --add branch.main.merge refs/heads/main
+expect_failure "branch.main.merge expected exactly one value 'refs/heads/main'" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset-all branch.main.merge
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --apply >/dev/null
+git -C "$fixture_repo" config --local remote.origin.push \
+  refs/heads/downstream/main:refs/heads/main
+expect_failure "effective remote.origin.push must be unset" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --apply >/dev/null
+git -C "$fixture_repo" config --local branch.main.pushRemote evil
+expect_failure "effective branch pushRemote must be unset" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --apply >/dev/null
+git -C "$fixture_repo" config --local branch.main.mergeOptions '--no-ff -s ours'
+expect_failure "effective branch.main.mergeOptions must be unset" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --apply >/dev/null
+git -C "$fixture_repo" config --local pull.twohead ours
+expect_failure "effective pull.twohead must be unset" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --apply >/dev/null
+git -C "$fixture_repo" config --local core.sshCommand 'ssh -o HostName=evil.example'
+expect_failure "effective core.sshCommand must be unset" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --apply >/dev/null
+git -C "$fixture_repo" config --local remote.origin.vcs evil
+expect_failure "effective remote.origin.vcs must be unset" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --apply >/dev/null
+git -C "$fixture_repo" config --local --replace-all remote.origin.fetch \
+  '+refs/heads/downstream/main:refs/remotes/origin/main'
+expect_failure "remote.origin.fetch expected exactly one value '+refs/heads/*:refs/remotes/origin/*'" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --apply >/dev/null
+git -C "$fixture_repo" config --local --replace-all remote.upstream.fetch \
+  '+refs/heads/main:refs/remotes/origin/downstream/main'
+expect_failure "remote.upstream.fetch expected exactly one value '+refs/heads/*:refs/remotes/upstream/*'" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --apply >/dev/null
+git -C "$fixture_repo" config --local remote.origin.mirror true
+expect_failure "effective remote.origin.mirror must be unset" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --apply >/dev/null
+
+git -C "$fixture_repo" config --local extensions.worktreeConfig true
+git -C "$fixture_repo" config --worktree push.default current
+expect_failure "effective push.default expected 'simple'" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --apply
+git -C "$fixture_repo" config --worktree --unset push.default
+git -C "$fixture_repo" config --worktree branch.main.merge refs/heads/downstream/main
+expect_failure "effective branch.main.merge expected exactly one value 'refs/heads/main'" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --worktree --unset branch.main.merge
+git -C "$fixture_repo" config --worktree branch.main.mergeOptions '--no-ff -s ours'
+expect_failure "effective branch.main.mergeOptions must be unset" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --worktree --unset branch.main.mergeOptions
+git -C "$fixture_repo" config --worktree pull.twohead ours
+expect_failure "effective pull.twohead must be unset" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --worktree --unset pull.twohead
+git -C "$fixture_repo" config --worktree core.sshCommand \
+  'ssh -o HostName=evil.example'
+expect_failure "effective core.sshCommand must be unset" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --worktree --unset core.sshCommand
+git -C "$fixture_repo" config --worktree remote.upstream.vcs evil
+expect_failure "effective remote.upstream.vcs must be unset" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --worktree --unset remote.upstream.vcs
+git -C "$fixture_repo" config --worktree remote.origin.mirror true
+expect_failure "effective remote.origin.mirror must be unset" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --worktree --unset remote.origin.mirror
+git -C "$fixture_repo" config --worktree --replace-all remote.upstream.fetch \
+  '+refs/heads/main:refs/remotes/origin/downstream/main'
+expect_failure "effective remote.upstream.fetch expected exactly one value '+refs/heads/*:refs/remotes/upstream/*'" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --worktree --unset-all remote.upstream.fetch
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check >/dev/null
+
+linked_worktree="$fixture_root/valid-linked"
+git -C "$fixture_repo" worktree add --quiet -b feature/linked "$linked_worktree" downstream/main
+git -C "$linked_worktree" config --worktree remote.origin.url https://evil.example/bowenQT/new-api.git
+expect_failure "unexpected effective origin fetch URL in worktree" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$linked_worktree" config --worktree --unset remote.origin.url
+git -C "$linked_worktree" config --worktree url.https://evil.example/.insteadOf DISABLED
+expect_failure "effective upstream push URL must be exactly DISABLED in worktree" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$linked_worktree" config --worktree --unset url.https://evil.example/.insteadOf
+git -C "$linked_worktree" config --worktree push.default current
+expect_failure "effective push.default expected 'simple'" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$linked_worktree" config --worktree --unset push.default
+git -C "$linked_worktree" config --worktree branch.main.merge refs/heads/downstream/main
+expect_failure "effective branch.main.merge expected exactly one value 'refs/heads/main'" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$linked_worktree" config --worktree --unset branch.main.merge
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check >/dev/null
+
+global_config="$fixture_root/global-config"
+git config --file "$global_config" push.default simple
+GIT_CONFIG_GLOBAL="$global_config" run_in_repo "$fixture_repo" \
+  scripts/agent-runtime/bootstrap.sh --check >/dev/null
 
 git -C "$fixture_repo" switch --quiet downstream/main
+git -C "$fixture_repo" branch -D main >/dev/null
+git -C "$fixture_repo" config --local branch.main.remote upstream
+git -C "$fixture_repo" config --local branch.main.merge refs/heads/downstream/main
+expect_failure "branch.main.remote expected exactly one value 'origin'" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --apply >/dev/null
+git -C "$fixture_repo" branch main refs/remotes/origin/main
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check >/dev/null
+downstream_commit=$(git -C "$fixture_repo" rev-parse refs/heads/downstream/main)
+git -C "$fixture_repo" switch --quiet main
+git -C "$fixture_repo" branch -D downstream/main >/dev/null
+git -C "$fixture_repo" update-ref -d refs/remotes/origin/downstream/main
+git -C "$fixture_repo" config --local branch.downstream/main.remote origin
+git -C "$fixture_repo" config --local branch.downstream/main.merge refs/heads/feature/stale-downstream
+expect_failure "branch.downstream/main.merge expected exactly one value 'refs/heads/downstream/main'" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --apply >/dev/null
+git -C "$fixture_repo" branch downstream/main "$downstream_commit"
+git -C "$fixture_repo" update-ref refs/remotes/origin/downstream/main "$downstream_commit"
+git -C "$fixture_repo" switch --quiet downstream/main
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check >/dev/null
+main_branch_config="$fixture_root/main-branch-config"
+git config --file "$main_branch_config" branch.main.remote upstream
+git config --file "$main_branch_config" branch.main.merge refs/heads/downstream/main
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$main_branch_config"
+expect_failure "branch-conditioned safety override" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+git config --file "$main_branch_config" --unset-all branch.main.remote
+git config --file "$main_branch_config" --unset-all branch.main.merge
+git config --file "$main_branch_config" remote.origin.pushurl https://evil.example/repo.git
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$main_branch_config"
+expect_failure "branch-conditioned safety override" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+git config --file "$main_branch_config" --unset-all remote.origin.pushurl
+git config --file "$main_branch_config" url.https://evil.example/.pushInsteadOf https://github.com/
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$main_branch_config"
+expect_failure "branch-conditioned safety override" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+git config --file "$main_branch_config" --unset-all url.https://evil.example/.pushInsteadOf
+git config --file "$main_branch_config" remote.origin.push \
+  refs/heads/downstream/main:refs/heads/main
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$main_branch_config"
+expect_failure "branch-conditioned safety override" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+git config --file "$main_branch_config" --unset-all remote.origin.push
+git config --file "$main_branch_config" branch.main.pushRemote evil
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$main_branch_config"
+expect_failure "branch-conditioned safety override" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+git config --file "$main_branch_config" --unset-all branch.main.pushRemote
+git config --file "$main_branch_config" branch.main.mergeOptions '--no-ff -s ours'
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$main_branch_config"
+expect_failure "branch-conditioned safety override" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+git config --file "$main_branch_config" --unset-all branch.main.mergeOptions
+git config --file "$main_branch_config" pull.twohead ours
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$main_branch_config"
+expect_failure "branch-conditioned safety override" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+git config --file "$main_branch_config" --unset-all pull.twohead
+git config --file "$main_branch_config" core.sshCommand \
+  'ssh -o HostName=evil.example'
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$main_branch_config"
+expect_failure "branch-conditioned safety override" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+git config --file "$main_branch_config" --unset-all core.sshCommand
+git config --file "$main_branch_config" remote.origin.vcs evil
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$main_branch_config"
+expect_failure "branch-conditioned safety override" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+git config --file "$main_branch_config" --unset-all remote.origin.vcs
+git config --file "$main_branch_config" remote.origin.fetch \
+  '+refs/heads/downstream/main:refs/remotes/origin/main'
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$main_branch_config"
+expect_failure "branch-conditioned safety override" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+git config --file "$main_branch_config" --unset-all remote.origin.fetch
+git config --file "$main_branch_config" remote.upstream.fetch \
+  '+refs/heads/main:refs/remotes/origin/downstream/main'
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$main_branch_config"
+expect_failure "branch-conditioned safety override" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+git config --file "$main_branch_config" --unset-all remote.upstream.fetch
+git config --file "$main_branch_config" remote.origin.mirror true
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$main_branch_config"
+expect_failure "branch-conditioned safety override" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+git config --file "$main_branch_config" --unset-all remote.origin.mirror
+git config --file "$main_branch_config" pull.ff only
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$main_branch_config"
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check >/dev/null
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+git config --file "$main_branch_config" --unset-all pull.ff
+nested_onbranch_outer_config="$fixture_root/nested-onbranch-outer-config"
+nested_onbranch_inner_config="$fixture_root/nested-onbranch-inner-config"
+git config --file "$nested_onbranch_inner_config" branch.main.merge \
+  refs/heads/downstream/main
+git config --file "$nested_onbranch_outer_config" includeIf.onbranch:main.path \
+  "$nested_onbranch_inner_config"
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path \
+  "$nested_onbranch_outer_config"
+expect_failure "branch-conditioned safety override" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+git -C "$fixture_repo" config --local includeIf.onbranch:release/.path \
+  "$nested_onbranch_outer_config"
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check >/dev/null
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:release/.path
+git config --file "$nested_onbranch_outer_config" --unset-all \
+  includeIf.onbranch:main.path
+git config --file "$nested_onbranch_outer_config" includeIf.onbranch:main/.path \
+  "$nested_onbranch_inner_config"
+git -C "$fixture_repo" config --local includeIf.onbranch:release/.path \
+  "$nested_onbranch_outer_config"
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check >/dev/null
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:release/.path
+git config --file "$nested_onbranch_outer_config" --unset-all \
+  includeIf.onbranch:main/.path
+git config --file "$nested_onbranch_outer_config" 'includeIf.onbranch:main-*.path' \
+  "$nested_onbranch_inner_config"
+git -C "$fixture_repo" config --local 'includeIf.onbranch:release-*.path' \
+  "$nested_onbranch_outer_config"
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check >/dev/null
+git -C "$fixture_repo" config --local --unset 'includeIf.onbranch:release-*.path'
+git config --file "$nested_onbranch_outer_config" --unset-all \
+  'includeIf.onbranch:main-*.path'
+git config --file "$nested_onbranch_outer_config" 'includeIf.onbranch:**/main.path' \
+  "$nested_onbranch_inner_config"
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path \
+  "$nested_onbranch_outer_config"
+expect_failure "branch-conditioned safety override" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+nested_onbranch_middle_config="$fixture_root/nested-onbranch-middle-config"
+git config --file "$nested_onbranch_inner_config" --unset-all branch.main.merge
+git config --file "$nested_onbranch_inner_config" pull.ff false
+git config --file "$nested_onbranch_middle_config" \
+  'includeIf.onbranch:release-dev*.path' "$nested_onbranch_inner_config"
+git config --file "$nested_onbranch_outer_config" --unset-all \
+  'includeIf.onbranch:**/main.path'
+git config --file "$nested_onbranch_outer_config" \
+  'includeIf.onbranch:release-prod*.path' "$nested_onbranch_middle_config"
+git -C "$fixture_repo" config --local 'includeIf.onbranch:release-*.path' \
+  "$nested_onbranch_outer_config"
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check >/dev/null
+git config --file "$nested_onbranch_middle_config" --unset-all \
+  'includeIf.onbranch:release-dev*.path'
+git config --file "$nested_onbranch_middle_config" \
+  'includeIf.onbranch:release-prod1.path' "$nested_onbranch_inner_config"
+expect_failure "branch-conditioned safety override" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset 'includeIf.onbranch:release-*.path'
+git config --file "$nested_onbranch_middle_config" --unset-all \
+  'includeIf.onbranch:release-prod1.path'
+git config --file "$nested_onbranch_middle_config" \
+  'includeIf.onbranch:[ac]*.path' "$nested_onbranch_inner_config"
+git config --file "$nested_onbranch_outer_config" --unset-all \
+  'includeIf.onbranch:release-prod*.path'
+git config --file "$nested_onbranch_outer_config" \
+  'includeIf.onbranch:[bc]*.path' "$nested_onbranch_middle_config"
+git -C "$fixture_repo" config --local 'includeIf.onbranch:[ab]*.path' \
+  "$nested_onbranch_outer_config"
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check >/dev/null
+git config --file "$nested_onbranch_middle_config" --unset-all \
+  'includeIf.onbranch:[ac]*.path'
+git config --file "$nested_onbranch_middle_config" \
+  'includeIf.onbranch:[b]*.path' "$nested_onbranch_inner_config"
+expect_failure "branch-conditioned safety override" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset 'includeIf.onbranch:[ab]*.path'
+git config --file "$nested_onbranch_middle_config" --unset-all \
+  'includeIf.onbranch:[b]*.path'
+git config --file "$nested_onbranch_outer_config" --unset-all \
+  'includeIf.onbranch:[bc]*.path'
+git config --file "$nested_onbranch_outer_config" \
+  'includeIf.onbranch:release-*-dev.path' "$nested_onbranch_inner_config"
+git -C "$fixture_repo" config --local \
+  'includeIf.onbranch:release-*-prod.path' "$nested_onbranch_outer_config"
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check >/dev/null
+git config --file "$nested_onbranch_outer_config" --unset-all \
+  'includeIf.onbranch:release-*-dev.path'
+git config --file "$nested_onbranch_outer_config" \
+  'includeIf.onbranch:release-*-prod.path' "$nested_onbranch_inner_config"
+expect_failure "branch-conditioned safety override" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset \
+  'includeIf.onbranch:release-*-prod.path'
+nested_outer_config="$fixture_root/nested-outer-config"
+nested_inactive_config="$fixture_root/nested-inactive-config"
+git config --file "$nested_inactive_config" pull.ff false
+git config --file "$nested_outer_config" include.path "$nested_inactive_config"
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$nested_outer_config"
+expect_failure "branch-conditioned safety override" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+git config --file "$nested_outer_config" --unset-all include.path
+conditioned_cycle="$fixture_root/conditioned-cycle"
+git config --file "$conditioned_cycle" include.path "$conditioned_cycle"
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$conditioned_cycle"
+expect_failure "branch-conditioned include cycle" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+git config --file "$nested_outer_config" \
+  includeIf.gitdir:/definitely/not/this/repository/.path "$nested_inactive_config"
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$nested_outer_config"
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check >/dev/null
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+git config --file "$nested_outer_config" --unset-all \
+  includeIf.gitdir:/definitely/not/this/repository/.path
+fixture_git_dir=$(git -C "$fixture_repo" rev-parse --absolute-git-dir)
+git config --file "$nested_outer_config" \
+  "includeIf.gitdir:$fixture_git_dir.path" "$nested_inactive_config"
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$nested_outer_config"
+expect_failure "branch-conditioned safety override" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+git config --file "$nested_outer_config" --unset-all \
+  "includeIf.gitdir:$fixture_git_dir.path"
+nested_malformed_include="$fixture_root/nested-malformed-include"
+printf '%s\n' '[unterminated' > "$nested_malformed_include"
+git config --file "$nested_outer_config" \
+  "includeIf.gitdir:$fixture_git_dir.path" "$nested_malformed_include"
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$nested_outer_config"
+expect_failure "cannot evaluate nested conditioned include" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+git config --file "$nested_outer_config" --unset-all \
+  "includeIf.gitdir:$fixture_git_dir.path"
+malformed_include="$fixture_root/malformed-include"
+printf '%s\n' '[unterminated' > "$malformed_include"
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path \
+  "$malformed_include"
+expect_failure "cannot parse branch-conditioned include" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+prefix_root="$fixture_root/prefix-root"
+prefix_bin="$fixture_root/prefix-bin"
+mkdir -p "$prefix_root/libexec/git-core" "$prefix_bin"
+git config --file "$prefix_root/runtime-safe.conf" color.ui auto
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'if [[ "${1:-}" == "--exec-path" ]]; then' \
+  '  printf "%s/libexec/git-core\\n" "$RUNTIME_TEST_PREFIX"' \
+  '  exit 0' \
+  'fi' \
+  'exec "$RUNTIME_TEST_GIT" "$@"' \
+  > "$prefix_bin/git"
+chmod +x "$prefix_bin/git"
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path \
+  '%(prefix)/runtime-safe.conf'
+runtime_test_git=$(command -v git)
+PATH="$prefix_bin:$PATH" \
+  RUNTIME_TEST_PREFIX="$prefix_root" \
+  RUNTIME_TEST_GIT="$runtime_test_git" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check >/dev/null
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+tilde_home="$fixture_root/tilde-home"
+mkdir -p "$tilde_home"
+git config --file "$tilde_home/main.conf" color.ui auto
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path '~/main.conf'
+HOME="$tilde_home" run_in_repo "$fixture_repo" \
+  scripts/agent-runtime/bootstrap.sh --check >/dev/null
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+named_user=$(id -un)
+named_user_home=$(git -c "runtime.includePath=~$named_user" config \
+  --type=path --get runtime.includePath)
+named_user_include=$(mktemp "$named_user_home/.newapi-runtime-test.XXXXXX")
+git config --file "$named_user_include" color.ui auto
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path \
+  "~$named_user/${named_user_include##*/}"
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check >/dev/null
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
 expect_failure "edit mode requires a symbolic topic branch" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/preflight.sh --mode edit
 
@@ -148,7 +573,73 @@ printf 'placeholder\n' > "$fixture_repo/.env"
 expect_failure "ignored credential/data artifact" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/preflight.sh --mode edit
 rm -f "$fixture_repo/.env"
+printf 'placeholder\n' > "$fixture_repo/a b.pem"
+expect_failure "suspicious uncommitted credential/data artifact: a b.pem" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/preflight.sh --mode edit
+rm -f "$fixture_repo/a b.pem"
+printf 'placeholder\n' > "$fixture_repo/source key.pem"
+git -C "$fixture_repo" add -- 'source key.pem'
+git -C "$fixture_repo" commit --quiet -m sensitive-rename-fixture
+git -C "$fixture_repo" mv -- 'source key.pem' safe-renamed.txt
+expect_failure "suspicious uncommitted credential/data artifact: source key.pem" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/preflight.sh --mode edit
+git -C "$fixture_repo" mv -- safe-renamed.txt 'source key.pem'
 run_in_repo "$fixture_repo" scripts/agent-runtime/preflight.sh --mode edit >/dev/null
+
+mkdir -p "$fixture_repo/docs"
+git -C "$fixture_repo" mv -- pkg/billingexpr/rename-source.go docs/renamed.md
+git -C "$fixture_repo" commit --quiet -m rename-high-risk-path
+
+mkdir -p \
+  "$fixture_repo/pkg/billingexpr" \
+  "$fixture_repo/oauth" \
+  "$fixture_repo/i18n" \
+  "$fixture_repo/constant" \
+  "$fixture_repo/web/src/routes" \
+  "$fixture_repo/docs"
+printf 'fixture\n' > "$fixture_repo/pkg/billingexpr/runtime-review.go"
+printf 'fixture\n' > "$fixture_repo/oauth/runtime-review.go"
+printf 'fixture\n' > "$fixture_repo/i18n/runtime-review.go"
+printf 'fixture\n' > "$fixture_repo/constant/runtime-review.go"
+printf 'fixture\n' > "$fixture_repo/web/src/routes/runtime-review.tsx"
+printf 'fixture\n' > "$fixture_repo/web/package.json"
+printf 'fixture\n' > "$fixture_repo/web/bun.lock"
+printf 'fixture\n' > "$fixture_repo/web/rsbuild.config.ts"
+printf 'fixture\n' > "$fixture_repo/docs/ordinary.md"
+git -C "$fixture_repo" add -- \
+  pkg/billingexpr/runtime-review.go \
+  oauth/runtime-review.go \
+  i18n/runtime-review.go \
+  constant/runtime-review.go \
+  web/src/routes/runtime-review.tsx \
+  web/package.json \
+  web/bun.lock \
+  web/rsbuild.config.ts \
+  docs/ordinary.md
+git -C "$fixture_repo" commit --quiet -m high-risk-paths
+audit_output="$fixture_root/upstream-audit-output"
+run_in_repo "$fixture_repo" scripts/agent-runtime/upstream-audit.sh --no-fetch --target HEAD > "$audit_output"
+semantic_paths=$(awk '/^semantic_review_paths:$/ { capture = 1; next } capture { print }' "$audit_output")
+for high_risk_path in \
+  pkg/billingexpr/rename-source.go \
+  pkg/billingexpr/runtime-review.go \
+  oauth/runtime-review.go \
+  i18n/runtime-review.go \
+  constant/runtime-review.go \
+  web/src/routes/runtime-review.tsx \
+  web/package.json \
+  web/bun.lock \
+  web/rsbuild.config.ts; do
+  if ! grep -Fxq "$high_risk_path" <<< "$semantic_paths"; then
+    echo "ERROR: semantic review omitted high-risk path: $high_risk_path" >&2
+    exit 1
+  fi
+done
+if grep -Fxq 'docs/ordinary.md' <<< "$semantic_paths"; then
+  echo "ERROR: semantic review included an ordinary docs path" >&2
+  exit 1
+fi
+
 expect_failure "contains downstream-only history" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/preflight.sh --mode upstream-edit
 
