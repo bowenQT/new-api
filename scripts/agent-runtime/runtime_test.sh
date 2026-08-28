@@ -169,6 +169,10 @@ git -C "$linked_worktree" config --worktree remote.origin.url https://evil.examp
 expect_failure "unexpected effective origin fetch URL in worktree" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
 git -C "$linked_worktree" config --worktree --unset remote.origin.url
+git -C "$linked_worktree" config --worktree url.https://evil.example/.insteadOf DISABLED
+expect_failure "effective upstream push URL must be exactly DISABLED in worktree" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$linked_worktree" config --worktree --unset url.https://evil.example/.insteadOf
 git -C "$linked_worktree" config --worktree push.default current
 expect_failure "effective push.default expected exactly one value 'simple'" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check

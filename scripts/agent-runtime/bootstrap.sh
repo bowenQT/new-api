@@ -132,6 +132,18 @@ validate_effective_urls() {
   fi
 }
 
+validate_effective_upstream_push() {
+  local worktree_path=$1
+  local actual
+  local count
+  actual=$(git -C "$worktree_path" remote get-url --push --all upstream 2>/dev/null || true)
+  count=$({ git -C "$worktree_path" remote get-url --push --all upstream 2>/dev/null || true; } | awk 'END { print NR + 0 }')
+  if [[ "$count" != "1" || "$actual" != "DISABLED" ]]; then
+    echo "ERROR: effective upstream push URL must be exactly DISABLED in worktree $worktree_path, found $count: '${actual:-<unset>}'" >&2
+    return 1
+  fi
+}
+
 for worktree_path in "${worktree_paths[@]}"; do
   validate_effective_urls "$worktree_path" origin bowenQT/new-api fetch
   validate_effective_urls "$worktree_path" origin bowenQT/new-api push
@@ -182,6 +194,10 @@ if [[ "$mode" == "apply" ]]; then
   fi
 fi
 
+for worktree_path in "${worktree_paths[@]}"; do
+  validate_effective_upstream_push "$worktree_path"
+done
+
 check_local_config() {
   local key=$1
   local expected=$2
@@ -230,12 +246,6 @@ for required_config in "${required_configs[@]}"; do
     check_effective_config "$worktree_path" "$key" "$expected"
   done
 done
-
-effective_upstream_push=$(git remote get-url --push --all upstream 2>/dev/null || true)
-if [[ "$effective_upstream_push" != "DISABLED" ]]; then
-  echo "ERROR: effective upstream push URL must be DISABLED, found '${effective_upstream_push:-<unset>}'" >&2
-  exit 1
-fi
 
 if git show-ref --verify --quiet refs/heads/main; then
   check_local_config branch.main.remote origin
