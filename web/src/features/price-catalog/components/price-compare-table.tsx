@@ -176,6 +176,9 @@ export function PriceCompareTable(props: Props) {
                           missing: costs.some(
                             (cost) => cost.status === 'missing'
                           ),
+                          sourceConfigChanged: costs.some(
+                            (cost) => cost.source_config_changed
+                          ),
                         }}
                         className='flex flex-wrap gap-1'
                       />
@@ -301,6 +304,8 @@ export function PriceCompareTable(props: Props) {
                                   variesByProvider: price.varies_by_provider,
                                   canonicalConflict: price.canonical_conflict,
                                   missing: price.status === 'missing',
+                                  sourceConfigChanged:
+                                    price.source_config_changed,
                                 }}
                                 className='mt-1 flex flex-wrap gap-1'
                               />

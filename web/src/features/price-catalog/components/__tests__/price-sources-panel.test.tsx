@@ -28,7 +28,7 @@ import { afterEach, describe, expect, test } from 'vitest'
 
 import { api } from '@/lib/api'
 
-import type { PriceSourceView } from '../../types'
+import type { PriceAlert, PriceSourceView } from '../../types'
 import { PriceSourcesPanel } from '../price-sources-panel'
 
 type ApiMethod = (url: string, config?: unknown) => Promise<{ data: unknown }>
@@ -69,11 +69,15 @@ function priceSource(
 }
 
 /**
- * Serves the two GETs the panel makes. The current-price projection is served
+ * Serves the two GETs the panel makes. The current-price entries are served
  * empty on purpose: coverage, missing and staleness must come from the source
- * list, never from a join against the catalog entries.
+ * list, never from a join against the catalog entries. Only the health alerts
+ * come from that projection.
  */
-function installApi(sources: PriceSourceView[] | Error) {
+function installApi(
+  sources: PriceSourceView[] | Error,
+  alerts: PriceAlert[] = []
+) {
   apiClient.get = async (url) => {
     if (url === '/api/upstream-price-sources') {
       if (sources instanceof Error) throw sources
@@ -83,7 +87,7 @@ function installApi(sources: PriceSourceView[] | Error) {
       return {
         data: {
           success: true,
-          data: { generated_at: 1_700_000_000, entries: [], alerts: [] },
+          data: { generated_at: 1_700_000_000, entries: [], alerts },
         },
       }
     }
@@ -158,6 +162,30 @@ describe('price sources panel', () => {
     expect(row.getByText('2 missing')).toBeInTheDocument()
     expect(row.getByText('Stale')).toBeInTheDocument()
     expect(row.getByText('Missing upstream')).toBeInTheDocument()
+  })
+
+  test('labels a source whose configuration changed after its last successful run', async () => {
+    installApi(
+      [priceSource({ stale: false, missing_count: 0 })],
+      [
+        {
+          code: 'source_config_changed',
+          source_id: 1,
+          source_name: 'Vercel gateway cost',
+          detail:
+            'source configuration changed after run 7; its prices are not confirmed until the next successful sync',
+        },
+      ]
+    )
+
+    renderPanel()
+
+    const row = within(await rowOf('Vercel gateway cost'))
+    expect(
+      row.getByText(
+        'Source configuration changed, cost is not confirmed until the next sync'
+      )
+    ).toBeInTheDocument()
   })
 
   test('reports a source whose last successful run never finished as never run', async () => {

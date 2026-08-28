@@ -62,12 +62,15 @@ export type CatalogFlags = {
   canonicalConflict?: boolean
   variesByProvider?: boolean
   costInverted?: boolean
+  sourceConfigChanged?: boolean
 }
 
 /**
  * Integrity and freshness labels required on every catalog surface
  * (spec §11.1, §11.2). `varies_by_provider` carries the mandatory wording from
- * spec §6.2 so such an observation is never presented as a confirmed cost.
+ * spec §6.2 so such an observation is never presented as a confirmed cost, and
+ * `source_config_changed` states why an observation taken under an older source
+ * configuration is no longer a confirmed cost (spec §7.3, §9.2).
  */
 export function CatalogFlagBadges(props: {
   flags: CatalogFlags
@@ -81,7 +84,8 @@ export function CatalogFlagBadges(props: {
     flags.orphaned ||
     flags.canonicalConflict ||
     flags.variesByProvider ||
-    flags.costInverted
+    flags.costInverted ||
+    flags.sourceConfigChanged
 
   if (!hasAny) return null
 
@@ -95,6 +99,13 @@ export function CatalogFlagBadges(props: {
       {flags.variesByProvider && (
         <Badge variant='warning'>
           {t('Prices differ across providers, cost is not confirmed')}
+        </Badge>
+      )}
+      {flags.sourceConfigChanged && (
+        <Badge variant='warning'>
+          {t(
+            'Source configuration changed, cost is not confirmed until the next sync'
+          )}
         </Badge>
       )}
       {flags.missing && (

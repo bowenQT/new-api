@@ -183,6 +183,13 @@ export interface CurrentPriceEntry {
   orphaned: boolean
   varies_by_provider: boolean
   canonical_conflict: boolean
+  /**
+   * The run behind this observation executed under a different source
+   * configuration than the source carries now (spec §7.3, §9.2). The price is
+   * still shown as evidence, but it is not a confirmed current cost until the
+   * source syncs again.
+   */
+  source_config_changed: boolean
   metadata?: Record<string, string>
 }
 
@@ -232,6 +239,12 @@ export interface PriceCompareSourcePrice {
   orphaned: boolean
   varies_by_provider: boolean
   canonical_conflict: boolean
+  /**
+   * The run behind this cost executed under a different source configuration
+   * than the source carries now. Such a cost never enters the margin and forces
+   * `cost_confirmed: false` until the source syncs again.
+   */
+  source_config_changed: boolean
   snapshot_id?: number
   run_id?: number
   run_finished_at?: number

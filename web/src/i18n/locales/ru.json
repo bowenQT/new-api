@@ -4327,6 +4327,8 @@
     "Sort by ID": "Сортировать по ID",
     "Sort Order": "Порядок сортировки",
     "Source": "Источник",
+    "Source configuration changed": "Конфигурация источника изменена",
+    "Source configuration changed, cost is not confirmed until the next sync": "Конфигурация источника изменена, стоимость не подтверждена до следующей синхронизации",
     "Source Endpoint": "Исходная точка",
     "Source Field": "Исходное поле",
     "Source Header": "Исходный заголовок",

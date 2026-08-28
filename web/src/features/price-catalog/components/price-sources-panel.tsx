@@ -41,6 +41,7 @@ import { cn } from '@/lib/utils'
 import { getCurrentPrices, listPriceSources, updatePriceSource } from '../api'
 import {
   ADAPTER_LABELS,
+  ALERT_SOURCE_CONFIG_CHANGED,
   MIN_SCHEDULE_INTERVAL_SECONDS,
   priceCatalogQueryKeys,
 } from '../constants'
@@ -299,6 +300,10 @@ export function PriceSourcesPanel() {
                                 stale: source.stale,
                                 orphaned: source.orphaned,
                                 missing: source.missing_count > 0,
+                                sourceConfigChanged: sourceAlerts.some(
+                                  (alert) =>
+                                    alert.code === ALERT_SOURCE_CONFIG_CHANGED
+                                ),
                               }}
                               className='flex flex-wrap gap-1'
                             />

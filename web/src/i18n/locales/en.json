@@ -4327,6 +4327,8 @@
     "Sort by ID": "Sort by ID",
     "Sort Order": "Sort Order",
     "Source": "Source",
+    "Source configuration changed": "Source configuration changed",
+    "Source configuration changed, cost is not confirmed until the next sync": "Source configuration changed, cost is not confirmed until the next sync",
     "Source Endpoint": "Source Endpoint",
     "Source Field": "Source Field",
     "Source Header": "Source Header",

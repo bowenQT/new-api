@@ -4327,6 +4327,8 @@
     "Sort by ID": "使用 ID 排序",
     "Sort Order": "排序",
     "Source": "来源",
+    "Source configuration changed": "来源配置已变更",
+    "Source configuration changed, cost is not confirmed until the next sync": "来源配置已变更，成本待下次同步后确认",
     "Source Endpoint": "来源端点",
     "Source Field": "来源字段",
     "Source Header": "来源请求头",

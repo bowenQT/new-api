@@ -4327,6 +4327,8 @@
     "Sort by ID": "Sắp xếp theo ID",
     "Sort Order": "Thứ tự sắp xếp",
     "Source": "Nguồn",
+    "Source configuration changed": "Cấu hình nguồn đã thay đổi",
+    "Source configuration changed, cost is not confirmed until the next sync": "Cấu hình nguồn đã thay đổi, chi phí chưa xác định cho đến lần đồng bộ tiếp theo",
     "Source Endpoint": "Điểm nguồn",
     "Source Field": "Trường nguồn",
     "Source Header": "Header nguồn",

@@ -40,6 +40,7 @@ function costPrice(
     orphaned: false,
     varies_by_provider: false,
     canonical_conflict: false,
+    source_config_changed: false,
     run_id: 7,
     ...overrides,
   }
@@ -117,6 +118,44 @@ describe('price comparison table', () => {
       ).length
     ).toBeGreaterThan(0)
     expect(screen.getByText('Cost not confirmed')).toBeInTheDocument()
+  })
+
+  test('labels a cost observed under an older source configuration and keeps it unconfirmed', () => {
+    render(
+      <PriceCompareTable
+        entries={[
+          entry({
+            costs: [
+              costPrice({
+                source_config_changed: true,
+                usable_for_margin: false,
+              }),
+            ],
+            cost_confirmed: false,
+            min_cost_usd: undefined,
+            max_cost_usd: undefined,
+            worst_margin_usd: undefined,
+            worst_margin_rate: undefined,
+          }),
+        ]}
+      />
+    )
+
+    expect(
+      screen.getByText(
+        'Source configuration changed, cost is not confirmed until the next sync'
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByText('Cost not confirmed')).toBeInTheDocument()
+
+    expandSourceDetail()
+
+    expect(
+      screen.getAllByText(
+        'Source configuration changed, cost is not confirmed until the next sync'
+      )
+    ).toHaveLength(2)
+    expect(screen.getByText('Excluded from the margin')).toBeInTheDocument()
   })
 
   test('labels a model whose cost exceeds the projected sale price', () => {

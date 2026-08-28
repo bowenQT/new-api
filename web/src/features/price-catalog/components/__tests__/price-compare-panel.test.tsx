@@ -66,6 +66,7 @@ const comparison: PriceCompareResponse = {
           orphaned: false,
           varies_by_provider: false,
           canonical_conflict: false,
+          source_config_changed: false,
           fetched_at: 1_700_000_000,
         },
       ],

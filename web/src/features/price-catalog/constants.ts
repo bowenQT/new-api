@@ -81,12 +81,20 @@ export const SCOPE_LABEL_KEYS: Record<string, string> = {
   unknown: 'Unknown',
 }
 
+/**
+ * `upstreamprice.AlertSourceConfigChanged`. The alert is the per-source view of
+ * the same predicate the catalog entries carry as `source_config_changed`, so
+ * the source list labels a source from it without joining the projection.
+ */
+export const ALERT_SOURCE_CONFIG_CHANGED = 'source_config_changed'
+
 /** Catalog health alert codes (`service/upstreamprice/alerts.go`, spec §13). */
 export const ALERT_LABEL_KEYS: Record<string, string> = {
   source_consecutive_failures: 'Source failed repeatedly',
   source_stale: 'Cost source is stale',
   coverage_drop: 'Model coverage dropped',
   cost_inversion: 'Cost exceeds the projected sale price',
+  [ALERT_SOURCE_CONFIG_CHANGED]: 'Source configuration changed',
 }
 
 /** Run item / catalog entry status codes. */

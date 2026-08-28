@@ -4327,6 +4327,8 @@
     "Sort by ID": "IDでソート",
     "Sort Order": "並び順",
     "Source": "ソース",
+    "Source configuration changed": "ソース設定が変更されました",
+    "Source configuration changed, cost is not confirmed until the next sync": "ソース設定が変更されたため、次回同期までコストは確定しません",
     "Source Endpoint": "ソースエンドポイント",
     "Source Field": "コピー元フィールド",
     "Source Header": "コピー元ヘッダー",
