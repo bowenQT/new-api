@@ -78,7 +78,7 @@ matches_github_repo() {
   return 1
 }
 
-protected_config_regex='^(remote\.(origin|upstream)\.(url|pushurl)|remote\.pushdefault|url\..*\.(insteadof|pushinsteadof)|push\.default|pull\.ff|fetch\.prune|rebase\.autostash|merge\.autostash|merge\.conflictstyle|rerere\.enabled|rerere\.autoupdate|branch\.main\.(remote|merge)|branch\.downstream/main\.(remote|merge))$'
+protected_config_regex='^(remote\.(origin|upstream)\.(url|pushurl)|remote\.origin\.push|remote\.pushdefault|url\..*\.(insteadof|pushinsteadof)|push\.default|pull\.ff|fetch\.prune|rebase\.autostash|merge\.autostash|merge\.conflictstyle|rerere\.enabled|rerere\.autoupdate|branch\.main\.(remote|merge)|branch\.downstream/main\.(remote|merge))$'
 conditioned_config_files=()
 
 resolve_include_path() {
@@ -237,6 +237,19 @@ validate_effective_upstream_push() {
   fi
 }
 
+validate_effective_unset() {
+  local worktree_path=$1
+  local key=$2
+  local actual
+  local count
+  actual=$(git -C "$worktree_path" config --get-all "$key" 2>/dev/null || true)
+  count=$({ git -C "$worktree_path" config --get-all "$key" 2>/dev/null || true; } | awk 'END { print NR + 0 }')
+  if [[ "$count" != "0" ]]; then
+    echo "ERROR: worktree $worktree_path effective $key must be unset, found $count: '$actual'" >&2
+    return 1
+  fi
+}
+
 for worktree_path in "${worktree_paths[@]}"; do
   validate_branch_conditioned_config "$worktree_path"
   validate_effective_urls "$worktree_path" origin bowenQT/new-api fetch
@@ -266,6 +279,7 @@ for operation_path in "${operation_paths[@]}"; do
 done
 
 if [[ "$mode" == "apply" ]]; then
+  git config --local --unset-all remote.origin.push 2>/dev/null || true
   git config --local --replace-all remote.upstream.pushurl DISABLED
   git config --local --replace-all remote.pushDefault origin
   git config --local --replace-all push.default simple
@@ -290,6 +304,7 @@ fi
 
 for worktree_path in "${worktree_paths[@]}"; do
   validate_effective_upstream_push "$worktree_path"
+  validate_effective_unset "$worktree_path" remote.origin.push
 done
 
 check_local_config() {

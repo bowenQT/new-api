@@ -151,6 +151,11 @@ expect_failure "branch.main.merge expected exactly one value 'refs/heads/main'" 
   run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
 git -C "$fixture_repo" config --local --unset-all branch.main.merge
 run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --apply >/dev/null
+git -C "$fixture_repo" config --local remote.origin.push \
+  refs/heads/downstream/main:refs/heads/main
+expect_failure "effective remote.origin.push must be unset" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --apply >/dev/null
 
 git -C "$fixture_repo" config --local extensions.worktreeConfig true
 git -C "$fixture_repo" config --worktree push.default current
@@ -205,6 +210,13 @@ expect_failure "branch-conditioned safety override" \
 git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
 git config --file "$main_branch_config" --unset-all remote.origin.pushurl
 git config --file "$main_branch_config" url.https://evil.example/.pushInsteadOf https://github.com/
+git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$main_branch_config"
+expect_failure "branch-conditioned safety override" \
+  run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
+git -C "$fixture_repo" config --local --unset includeIf.onbranch:main.path
+git config --file "$main_branch_config" --unset-all url.https://evil.example/.pushInsteadOf
+git config --file "$main_branch_config" remote.origin.push \
+  refs/heads/downstream/main:refs/heads/main
 git -C "$fixture_repo" config --local includeIf.onbranch:main.path "$main_branch_config"
 expect_failure "branch-conditioned safety override" \
   run_in_repo "$fixture_repo" scripts/agent-runtime/bootstrap.sh --check
