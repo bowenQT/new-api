@@ -53,6 +53,13 @@
 
 </div>
 
+> [!NOTE]
+> **About this downstream fork:** This repository is maintained independently on
+> `downstream/main`; `main` remains an exact mirror of the upstream project. For
+> fork-specific development, synchronization, deployment, and operations, see
+> [Downstream Maintenance](./docs/downstream/README.md). The upstream project
+> identity and attribution below are preserved.
+
 ## 📝 Project Description
 
 > [!IMPORTANT]
@@ -398,7 +405,7 @@ docker run --name new-api -d --restart always \
 2. Search for **New-API** in the application store
 3. One-click installation
 
-📖 [Tutorial with images](./docs/BT.md)
+📖 [Tutorial with images](./docs/installation/BT.md)
 
 </details>
 
