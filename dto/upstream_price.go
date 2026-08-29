@@ -209,15 +209,44 @@ type UpstreamCurrentPriceResponse struct {
 	Alerts      []UpstreamPriceAlert        `json:"alerts"`
 }
 
+// UpstreamPriceAlertParams carries the structured values behind an alert's
+// Detail string so the admin UI can render a localized message instead of
+// displaying the English sentence. Detail keeps its existing content and
+// wording, so a client that ignores Params is unaffected.
+//
+// Only the fields documented for the alert's own code are set:
+//
+//	source_consecutive_failures: failure_count
+//	source_stale:                run_id, age_seconds, threshold_seconds
+//	source_config_changed:       run_id
+//	coverage_drop:               run_id, previous_valid_count, valid_count,
+//	                             drop_threshold, gate_refused
+//	cost_inversion:              group
+type UpstreamPriceAlertParams struct {
+	FailureCount       *int     `json:"failure_count,omitempty"`
+	RunId              *int     `json:"run_id,omitempty"`
+	AgeSeconds         *int64   `json:"age_seconds,omitempty"`
+	ThresholdSeconds   *int64   `json:"threshold_seconds,omitempty"`
+	PreviousValidCount *int     `json:"previous_valid_count,omitempty"`
+	ValidCount         *int     `json:"valid_count,omitempty"`
+	DropThreshold      *float64 `json:"drop_threshold,omitempty"`
+	// GateRefused distinguishes a coverage drop that the gate actually refused
+	// (the run is failed and advanced nothing) from a drop observed between two
+	// runs that both committed.
+	GateRefused *bool  `json:"gate_refused,omitempty"`
+	Group       string `json:"group,omitempty"`
+}
+
 // UpstreamPriceAlert is one catalog health signal (spec §13). Alerts are shown
 // in the admin UI and written to the backend log; they are never routed to a
 // notification channel.
 type UpstreamPriceAlert struct {
-	Code               string `json:"code"`
-	SourceId           int    `json:"source_id,omitempty"`
-	SourceName         string `json:"source_name,omitempty"`
-	CanonicalModelName string `json:"canonical_model_name,omitempty"`
-	Detail             string `json:"detail"`
+	Code               string                    `json:"code"`
+	SourceId           int                       `json:"source_id,omitempty"`
+	SourceName         string                    `json:"source_name,omitempty"`
+	CanonicalModelName string                    `json:"canonical_model_name,omitempty"`
+	Detail             string                    `json:"detail"`
+	Params             *UpstreamPriceAlertParams `json:"params,omitempty"`
 }
 
 // UpstreamPriceUsageVector is the limited-dimension usage basis of one price
@@ -338,6 +367,12 @@ type UpstreamPriceCompareSourcePrice struct {
 	// (spec §8.3) without a second full catalog request.
 	FetchedAt   int64  `json:"fetched_at,omitempty"`
 	EffectiveAt *int64 `json:"effective_at,omitempty"`
+	// UnsupportedDimensions is the snapshot metadata's comma-separated list of
+	// source pricing dimensions this catalog does not normalize (spec §6.2), so
+	// the comparison view can warn that the projected cost is incomplete. Only
+	// this one metadata key is exposed here; the rest of the snapshot metadata
+	// stays in the catalog response.
+	UnsupportedDimensions string `json:"unsupported_dimensions,omitempty"`
 }
 
 // UpstreamPriceCompareEntry is one model's comparison row (spec §11.2).

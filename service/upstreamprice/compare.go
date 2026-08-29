@@ -109,11 +109,17 @@ func (u appliedUsage) tokenParams() billingexpr.TokenParams {
 	}
 }
 
+// resolveUsage applies the requested usage vector. The default vector is
+// all-or-nothing: it stands in only for a caller that named no usage at all. A
+// caller that named one dimension has described the whole request, so the
+// dimensions it left out are zero — silently keeping a million default prompt
+// tokens under a request for `{"c": 1000}` would report a margin computed from
+// usage nobody asked for.
 func resolveUsage(requested *dto.UpstreamPriceUsageVector) appliedUsage {
-	usage := appliedUsage{P: defaultComparePromptTokens, C: defaultCompareCompletionTokens}
 	if requested == nil {
-		return usage
+		return appliedUsage{P: defaultComparePromptTokens, C: defaultCompareCompletionTokens}
 	}
+	usage := appliedUsage{}
 	if requested.PromptTokens != nil {
 		usage.P = *requested.PromptTokens
 	}
@@ -206,6 +212,7 @@ func CompareUpstreamPrices(request *dto.UpstreamPriceCompareRequest) (*dto.Upstr
 				Code:               AlertCostInversion,
 				CanonicalModelName: modelName,
 				Detail:             fmt.Sprintf("worst cost exceeds the projected sale price for group %q", group),
+				Params:             &dto.UpstreamPriceAlertParams{Group: group},
 			})
 		}
 		response.Entries = append(response.Entries, entry)
@@ -408,6 +415,11 @@ func projectCatalogEntry(catalogEntry dto.UpstreamCurrentPriceEntry, params bill
 		FetchedAt:           catalogEntry.FetchedAt,
 		EffectiveAt:         catalogEntry.EffectiveAt,
 		Projection:          ProjectionNotConfigured,
+		// Only this one metadata key is surfaced: it tells the admin the
+		// projected cost ignores dimensions the source actually prices
+		// (spec §6.2). The rest of the snapshot metadata stays out of the
+		// comparison response.
+		UnsupportedDimensions: catalogEntry.Metadata[MetadataKeyUnsupportedDimensions],
 	}
 	if catalogEntry.VariesByProvider {
 		price.ProjectionNote = VariesByProviderNote

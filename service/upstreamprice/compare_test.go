@@ -462,6 +462,98 @@ func TestCompareSourcePriceCarriesSnapshotTimestamps(t *testing.T) {
 	assert.Equal(t, effectiveAt, *cost.EffectiveAt)
 }
 
+// TestCompareSourcePriceCarriesUnsupportedDimensions pins the §6.2 label the
+// comparison view needs: the one metadata key naming the pricing dimensions
+// this catalog does not normalize is exposed on the source price, and the rest
+// of the snapshot metadata is not.
+func TestCompareSourcePriceCarriesUnsupportedDimensions(t *testing.T) {
+	db := setupCompareTestDB(t)
+	now := common.GetTimestamp()
+
+	channel := &model.Channel{Name: "dimensions-channel", Key: "k", Status: common.ChannelStatusEnabled}
+	require.NoError(t, db.Create(channel).Error)
+	metadata := `{"` + MetadataKeyUnsupportedDimensions + `":"fast,regional","provider_slug":"secret"}`
+	seedCatalogSnapshot(t, db, "dimensions-cost", RoleSupplierCost, &channel.Id, "dimensions-model",
+		`tier("base", p * 1 + c * 2)`, FormulaKindTokenExprV1, metadata, now)
+
+	response, err := CompareUpstreamPrices(&dto.UpstreamPriceCompareRequest{Models: []string{"dimensions-model"}})
+	require.NoError(t, err)
+	require.Len(t, response.Entries, 1)
+	require.Len(t, response.Entries[0].Costs, 1)
+	assert.Equal(t, "fast,regional", response.Entries[0].Costs[0].UnsupportedDimensions)
+
+	encoded, err := common.Marshal(response.Entries[0].Costs[0])
+	require.NoError(t, err)
+	assert.NotContains(t, string(encoded), "secret")
+}
+
+// TestResolveUsagePartialVector pins the §10.3 usage contract: the default
+// vector stands in only for a caller that named no usage at all. Naming one
+// dimension describes the whole request, so the rest are zero rather than
+// silently carrying a million default tokens into the margin.
+func TestResolveUsagePartialVector(t *testing.T) {
+	value := func(v float64) *float64 { return &v }
+	cases := []struct {
+		name      string
+		requested *dto.UpstreamPriceUsageVector
+		want      appliedUsage
+	}{
+		{
+			name:      "absent vector uses the documented default",
+			requested: nil,
+			want:      appliedUsage{P: defaultComparePromptTokens, C: defaultCompareCompletionTokens},
+		},
+		{
+			name:      "partial vector zeroes the dimensions it omits",
+			requested: &dto.UpstreamPriceUsageVector{PromptTokens: value(1000)},
+			want:      appliedUsage{P: 1000},
+		},
+		{
+			name:      "explicit zero stays zero",
+			requested: &dto.UpstreamPriceUsageVector{CompletionTokens: value(0)},
+			want:      appliedUsage{},
+		},
+		{
+			name: "full vector is applied verbatim",
+			requested: &dto.UpstreamPriceUsageVector{
+				PromptTokens:        value(10),
+				CompletionTokens:    value(20),
+				CacheReadTokens:     value(30),
+				CacheCreationTokens: value(40),
+			},
+			want: appliedUsage{P: 10, C: 20, CR: 30, CC: 40},
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			assert.Equal(t, testCase.want, resolveUsage(testCase.requested))
+		})
+	}
+}
+
+// TestCompareUpstreamPricesEchoesPartialUsage proves the echoed vector follows
+// the same semantics, so the response always states the basis of its amounts.
+func TestCompareUpstreamPricesEchoesPartialUsage(t *testing.T) {
+	setupCompareTestDB(t)
+	setupCompareSaleConfig(t)
+
+	completion := float64(2000)
+	response, err := CompareUpstreamPrices(&dto.UpstreamPriceCompareRequest{
+		Models: []string{"ratio-model"},
+		Usage:  &dto.UpstreamPriceUsageVector{CompletionTokens: &completion},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, float64(0), response.Usage.PromptTokens)
+	assert.Equal(t, completion, response.Usage.CompletionTokens)
+	assert.Equal(t, float64(0), response.Usage.CacheReadTokens)
+	assert.Equal(t, float64(0), response.Usage.CacheCreationTokens)
+
+	// 2000 completion tokens at completion ratio 4 and model ratio 1.5.
+	require.Len(t, response.Entries, 1)
+	require.NotNil(t, response.Entries[0].SaleBaseUSD)
+	assert.InDelta(t, 2000*4*1.5/common.QuotaPerUnit, *response.Entries[0].SaleBaseUSD, 1e-9)
+}
+
 // TestSelectCompareModelsFilter pins the §10.3 filter contract: the substring
 // filter narrows the catalog before the MaxCompareModels cap, so a catalog
 // larger than the cap stays searchable end to end.
