@@ -220,6 +220,39 @@ describe('price comparison table', () => {
     expect(definitionValue('Effective at')).toBe('-')
   })
 
+  test('warns in the source detail about pricing dimensions the catalog does not normalize', () => {
+    render(
+      <PriceCompareTable
+        entries={[
+          entry({
+            costs: [costPrice({ unsupported_dimensions: 'fast,regional' })],
+          }),
+        ]}
+      />
+    )
+
+    expect(
+      screen.queryByText(
+        'Unnormalized source pricing dimensions: fast, regional'
+      )
+    ).toBeNull()
+
+    expandSourceDetail()
+
+    expect(
+      screen.getByText('Unnormalized source pricing dimensions: fast, regional')
+    ).toBeInTheDocument()
+  })
+
+  test('shows no dimension warning for a cost the catalog fully normalizes', () => {
+    render(<PriceCompareTable entries={[entry()]} />)
+    expandSourceDetail()
+
+    expect(
+      screen.queryByText(/Unnormalized source pricing dimensions/)
+    ).toBeNull()
+  })
+
   test('expands and collapses the source detail of one model', () => {
     render(<PriceCompareTable entries={[entry()]} />)
 

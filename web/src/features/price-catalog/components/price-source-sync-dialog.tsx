@@ -48,6 +48,7 @@ import { previewPriceSource, syncPriceSource } from '../api'
 import {
   CHANGE_LABEL_KEYS,
   ENTRY_STATUS_LABEL_KEYS,
+  METADATA_KEY_UNSUPPORTED_DIMENSIONS,
   RUN_STATUS_LABEL_KEYS,
 } from '../constants'
 import type {
@@ -55,6 +56,7 @@ import type {
   PriceSourceView,
   PriceSyncResponse,
 } from '../types'
+import { UnsupportedDimensionsBadge } from './catalog-badges'
 
 /** Preview rows shown inline; the full diff can be large. */
 const PREVIEW_ITEM_LIMIT = 200
@@ -408,6 +410,13 @@ export function PriceSourceSyncDialog(props: Props) {
                                 )}
                               </Badge>
                             ) : null}
+                            <UnsupportedDimensionsBadge
+                              dimensions={
+                                item.metadata?.[
+                                  METADATA_KEY_UNSUPPORTED_DIMENSIONS
+                                ]
+                              }
+                            />
                           </span>
                         </TableCell>
                       </TableRow>

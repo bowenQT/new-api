@@ -55,6 +55,33 @@ export function ScopeBadge(props: { scope: PriceScope }) {
   )
 }
 
+/**
+ * Warns that the source priced this model along dimensions the catalog does not
+ * normalize (spec §6.2), so the projected amount is incomplete rather than a
+ * full cost. The backend sends the dimensions comma-separated; an absent or
+ * empty list renders nothing.
+ */
+export function UnsupportedDimensionsBadge(props: {
+  dimensions: string | undefined
+  className?: string
+}) {
+  const { t } = useTranslation()
+  const dimensions = (props.dimensions ?? '')
+    .split(',')
+    .map((dimension) => dimension.trim())
+    .filter((dimension) => dimension !== '')
+
+  if (dimensions.length === 0) return null
+
+  return (
+    <Badge variant='warning' className={props.className}>
+      {t('Unnormalized source pricing dimensions: {{dimensions}}', {
+        dimensions: dimensions.join(', '),
+      })}
+    </Badge>
+  )
+}
+
 export type CatalogFlags = {
   stale?: boolean
   missing?: boolean

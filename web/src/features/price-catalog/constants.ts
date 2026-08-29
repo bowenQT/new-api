@@ -103,6 +103,13 @@ export const ALERT_LABEL_KEYS: Record<string, string> = {
   [ALERT_SOURCE_CONFIG_CHANGED]: 'Source configuration changed',
 }
 
+/**
+ * `upstreamprice.MetadataKeyUnsupportedDimensions`. Preview items carry the
+ * whole snapshot metadata map, so the preview reads this key from it; the
+ * comparison response promotes the same value to its own field.
+ */
+export const METADATA_KEY_UNSUPPORTED_DIMENSIONS = 'unsupported_dimensions'
+
 /** Run item / catalog entry status codes. */
 export const ENTRY_STATUS_LABEL_KEYS: Record<string, string> = {
   current: 'Current',

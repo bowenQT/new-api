@@ -5492,6 +5492,7 @@
     "The source configuration changed after run #{{runId}}; its prices are not confirmed until the next successful sync.": "The source configuration changed after run #{{runId}}; its prices are not confirmed until the next successful sync.",
     "Valid model coverage fell from {{previous}} to {{current}} models, past the {{gate}} drop gate.": "Valid model coverage fell from {{previous}} to {{current}} models, past the {{gate}} drop gate.",
     "The worst catalog cost exceeds the projected sale price for group {{group}}.": "The worst catalog cost exceeds the projected sale price for group {{group}}.",
-    "The coverage gate refused run #{{runId}}. Valid model coverage would have fallen from {{previous}} to {{current}} models, past the {{gate}} drop gate, so nothing was written.": "The coverage gate refused run #{{runId}}. Valid model coverage would have fallen from {{previous}} to {{current}} models, past the {{gate}} drop gate, so nothing was written."
+    "The coverage gate refused run #{{runId}}. Valid model coverage would have fallen from {{previous}} to {{current}} models, past the {{gate}} drop gate, so nothing was written.": "The coverage gate refused run #{{runId}}. Valid model coverage would have fallen from {{previous}} to {{current}} models, past the {{gate}} drop gate, so nothing was written.",
+    "Unnormalized source pricing dimensions: {{dimensions}}": "Unnormalized source pricing dimensions: {{dimensions}}"
   }
 }

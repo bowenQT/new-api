@@ -39,7 +39,11 @@ import {
 } from '../constants'
 import { formatMarginRate, formatUsdAmount } from '../lib/compare-format'
 import type { PriceCompareEntry, PriceCompareSourcePrice } from '../types'
-import { CatalogFlagBadges, RoleBadge } from './catalog-badges'
+import {
+  CatalogFlagBadges,
+  RoleBadge,
+  UnsupportedDimensionsBadge,
+} from './catalog-badges'
 
 type Props = {
   entries: PriceCompareEntry[]
@@ -308,6 +312,11 @@ export function PriceCompareTable(props: Props) {
                                     price.source_config_changed,
                                 }}
                                 className='mt-1 flex flex-wrap gap-1'
+                              />
+
+                              <UnsupportedDimensionsBadge
+                                dimensions={price.unsupported_dimensions}
+                                className='mt-1'
                               />
 
                               {price.projection !== 'ok' && (

@@ -219,6 +219,35 @@ describe('price source sync dialog', () => {
     ).toBeInTheDocument()
   })
 
+  test('warns about a previewed model priced along dimensions the catalog does not normalize', async () => {
+    apiClient.post = async () => ({
+      data: {
+        success: true,
+        data: {
+          ...preview,
+          items: [
+            {
+              source_model_name: 'openai/gpt-4o',
+              canonical_model_name: 'gpt-4o',
+              status: 'valid',
+              change: 'new',
+              metadata: { unsupported_dimensions: 'fast,regional' },
+            },
+          ],
+        },
+      },
+    })
+
+    renderDialog()
+    fireEvent.click(screen.getByRole('button', { name: 'Run preview' }))
+
+    expect(
+      await screen.findByText(
+        'Unnormalized source pricing dimensions: fast, regional'
+      )
+    ).toBeInTheDocument()
+  })
+
   test('shows the empty preview message when the fetch discovered no model', async () => {
     apiClient.post = async () => ({
       data: {

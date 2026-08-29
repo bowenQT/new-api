@@ -5492,6 +5492,7 @@
     "The source configuration changed after run #{{runId}}; its prices are not confirmed until the next successful sync.": "Конфигурация источника изменилась после запуска №{{runId}}; его цены не подтверждены до следующей успешной синхронизации.",
     "Valid model coverage fell from {{previous}} to {{current}} models, past the {{gate}} drop gate.": "Покрытие валидных моделей упало с {{previous}} до {{current}}, что превышает порог падения {{gate}}.",
     "The worst catalog cost exceeds the projected sale price for group {{group}}.": "Худшая стоимость в каталоге превышает прогнозируемую цену продажи для группы {{group}}.",
-    "The coverage gate refused run #{{runId}}. Valid model coverage would have fallen from {{previous}} to {{current}} models, past the {{gate}} drop gate, so nothing was written.": "Контроль покрытия отклонил запуск №{{runId}}. Покрытие валидных моделей упало бы с {{previous}} до {{current}}, что превышает порог падения {{gate}}, поэтому ничего не записано."
+    "The coverage gate refused run #{{runId}}. Valid model coverage would have fallen from {{previous}} to {{current}} models, past the {{gate}} drop gate, so nothing was written.": "Контроль покрытия отклонил запуск №{{runId}}. Покрытие валидных моделей упало бы с {{previous}} до {{current}}, что превышает порог падения {{gate}}, поэтому ничего не записано.",
+    "Unnormalized source pricing dimensions: {{dimensions}}": "Ненормализованные ценовые измерения источника: {{dimensions}}"
   }
 }

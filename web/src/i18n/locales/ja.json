@@ -5492,6 +5492,7 @@
     "The source configuration changed after run #{{runId}}; its prices are not confirmed until the next successful sync.": "実行 #{{runId}} の後にソース設定が変更されました。次回の同期が成功するまで、その価格は確定コストとして扱われません。",
     "Valid model coverage fell from {{previous}} to {{current}} models, past the {{gate}} drop gate.": "有効モデル数が {{previous}} から {{current}} へ減少し、{{gate}} の低下ゲートを超えました。",
     "The worst catalog cost exceeds the projected sale price for group {{group}}.": "グループ {{group}} で最悪ケースのコストが想定販売価格を上回っています。",
-    "The coverage gate refused run #{{runId}}. Valid model coverage would have fallen from {{previous}} to {{current}} models, past the {{gate}} drop gate, so nothing was written.": "カバレッジゲートが実行 #{{runId}} を拒否しました。有効モデル数が {{previous}} から {{current}} へ減少し、{{gate}} の低下ゲートを超えるため、何も書き込まれていません。"
+    "The coverage gate refused run #{{runId}}. Valid model coverage would have fallen from {{previous}} to {{current}} models, past the {{gate}} drop gate, so nothing was written.": "カバレッジゲートが実行 #{{runId}} を拒否しました。有効モデル数が {{previous}} から {{current}} へ減少し、{{gate}} の低下ゲートを超えるため、何も書き込まれていません。",
+    "Unnormalized source pricing dimensions: {{dimensions}}": "正規化されていないソースの価格次元: {{dimensions}}"
   }
 }

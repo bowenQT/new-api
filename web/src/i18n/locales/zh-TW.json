@@ -5492,6 +5492,7 @@
     "The source configuration changed after run #{{runId}}; its prices are not confirmed until the next successful sync.": "來源設定在執行 #{{runId}} 之後發生變更，其價格在下次同步成功前不作為已確認成本。",
     "Valid model coverage fell from {{previous}} to {{current}} models, past the {{gate}} drop gate.": "有效模型覆蓋數從 {{previous}} 降至 {{current}}，超過 {{gate}} 的下降閘門。",
     "The worst catalog cost exceeds the projected sale price for group {{group}}.": "群組 {{group}} 的最差成本已超過其預估售價。",
-    "The coverage gate refused run #{{runId}}. Valid model coverage would have fallen from {{previous}} to {{current}} models, past the {{gate}} drop gate, so nothing was written.": "覆蓋率閘門拒絕了執行 #{{runId}}。有效模型覆蓋數將從 {{previous}} 降至 {{current}}，超過 {{gate}} 的下降閘門，因此本次未寫入任何資料。"
+    "The coverage gate refused run #{{runId}}. Valid model coverage would have fallen from {{previous}} to {{current}} models, past the {{gate}} drop gate, so nothing was written.": "覆蓋率閘門拒絕了執行 #{{runId}}。有效模型覆蓋數將從 {{previous}} 降至 {{current}}，超過 {{gate}} 的下降閘門，因此本次未寫入任何資料。",
+    "Unnormalized source pricing dimensions: {{dimensions}}": "來源含未正規化的價格維度：{{dimensions}}"
   }
 }

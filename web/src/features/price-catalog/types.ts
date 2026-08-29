@@ -281,6 +281,12 @@ export interface PriceCompareSourcePrice {
    */
   fetched_at?: number
   effective_at?: number
+  /**
+   * Comma-separated source pricing dimensions this catalog does not normalize
+   * (spec §6.2), taken from the snapshot's `unsupported_dimensions` metadata.
+   * When it is set, the projected cost is incomplete and must be labeled.
+   */
+  unsupported_dimensions?: string
 }
 
 /** `dto.UpstreamPriceCompareEntry` */

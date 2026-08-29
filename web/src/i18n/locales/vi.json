@@ -5492,6 +5492,7 @@
     "The source configuration changed after run #{{runId}}; its prices are not confirmed until the next successful sync.": "Cấu hình nguồn đã thay đổi sau lần chạy #{{runId}}; giá của nó chưa được xác nhận cho đến lần đồng bộ thành công tiếp theo.",
     "Valid model coverage fell from {{previous}} to {{current}} models, past the {{gate}} drop gate.": "Độ phủ mô hình hợp lệ đã giảm từ {{previous}} xuống {{current}}, vượt ngưỡng giảm {{gate}}.",
     "The worst catalog cost exceeds the projected sale price for group {{group}}.": "Chi phí xấu nhất trong danh mục vượt giá bán dự kiến cho nhóm {{group}}.",
-    "The coverage gate refused run #{{runId}}. Valid model coverage would have fallen from {{previous}} to {{current}} models, past the {{gate}} drop gate, so nothing was written.": "Cổng độ phủ đã từ chối lần chạy #{{runId}}. Độ phủ mô hình hợp lệ sẽ giảm từ {{previous}} xuống {{current}}, vượt ngưỡng giảm {{gate}}, nên không có dữ liệu nào được ghi."
+    "The coverage gate refused run #{{runId}}. Valid model coverage would have fallen from {{previous}} to {{current}} models, past the {{gate}} drop gate, so nothing was written.": "Cổng độ phủ đã từ chối lần chạy #{{runId}}. Độ phủ mô hình hợp lệ sẽ giảm từ {{previous}} xuống {{current}}, vượt ngưỡng giảm {{gate}}, nên không có dữ liệu nào được ghi.",
+    "Unnormalized source pricing dimensions: {{dimensions}}": "Chiều giá của nguồn chưa được chuẩn hóa: {{dimensions}}"
   }
 }
