@@ -491,17 +491,14 @@ func CommitPriceSync(commit *PriceSyncCommit) (*PriceSyncRun, error) {
 			return err
 		}
 
-		sourceUpdates := map[string]interface{}{
-			"updated_time": now,
+		if !persistSnapshots {
+			return stampPriceSourceFailure(tx, commit.SourceId, run.ErrorSummary, now)
 		}
-		if persistSnapshots {
-			sourceUpdates["last_success_run_id"] = run.Id
-			sourceUpdates["last_success_at"] = now
-		} else {
-			sourceUpdates["last_error_at"] = now
-			sourceUpdates["last_error_summary"] = truncateSummary(run.ErrorSummary)
-		}
-		return tx.Model(&PriceSource{}).Where("id = ?", commit.SourceId).Updates(sourceUpdates).Error
+		return tx.Model(&PriceSource{}).Where("id = ?", commit.SourceId).Updates(map[string]interface{}{
+			"last_success_run_id": run.Id,
+			"last_success_at":     now,
+			"updated_time":        now,
+		}).Error
 	})
 	if err != nil {
 		return nil, err
@@ -515,8 +512,16 @@ func CommitPriceSync(commit *PriceSyncCommit) (*PriceSyncRun, error) {
 // due check reads last_error_at, so an attempt that leaves no run must still
 // leave a timestamp or the source retries on every wake (spec §8.4).
 func RecordPriceSourceFailure(sourceId int, errorSummary string) error {
-	now := common.GetTimestamp()
-	return DB.Model(&PriceSource{}).Where("id = ?", sourceId).Updates(map[string]interface{}{
+	return stampPriceSourceFailure(DB, sourceId, errorSummary, common.GetTimestamp())
+}
+
+// stampPriceSourceFailure records a failed sync attempt on the source row: the
+// failure time, its bounded summary, and the row's update time. It runs on the
+// caller's handle, so a failed commit stamps the source inside the very
+// transaction that wrote its failed run and both roll back together (spec
+// §8.4).
+func stampPriceSourceFailure(tx *gorm.DB, sourceId int, errorSummary string, now int64) error {
+	return tx.Model(&PriceSource{}).Where("id = ?", sourceId).Updates(map[string]interface{}{
 		"last_error_at":      now,
 		"last_error_summary": truncateSummary(errorSummary),
 		"updated_time":       now,
@@ -581,11 +586,7 @@ func RecordFailedPriceSyncRun(sourceId int, run PriceSyncRun) (*PriceSyncRun, er
 		if err := tx.Create(&run).Error; err != nil {
 			return err
 		}
-		return tx.Model(&PriceSource{}).Where("id = ?", sourceId).Updates(map[string]interface{}{
-			"last_error_at":      now,
-			"last_error_summary": truncateSummary(run.ErrorSummary),
-			"updated_time":       now,
-		}).Error
+		return stampPriceSourceFailure(tx, sourceId, run.ErrorSummary, now)
 	})
 	if err != nil {
 		return nil, err

@@ -29,6 +29,18 @@ func staleThresholdSeconds(source *model.PriceSource, settings SourceSettings) i
 	return DefaultManualStaleThresholdSeconds
 }
 
+// sourceStale reports whether a source's last successful run finished longer
+// ago than its staleness threshold (spec §8.3). A run with no recorded finish
+// time is never stale: its age is unknown, and an unknown age is not a claim
+// the catalog makes. The role gate — only a supplier cost going stale is a
+// health problem — belongs to the caller, not here.
+func sourceStale(source *model.PriceSource, settings SourceSettings, run *model.PriceSyncRun, now int64) bool {
+	if run == nil || run.FinishedAt == nil {
+		return false
+	}
+	return now-*run.FinishedAt > staleThresholdSeconds(source, settings)
+}
+
 // GetCurrentUpstreamPrices projects the current price catalog (spec §8.3):
 // current entries are the valid run items of each source's last successful
 // run; missing entries keep their last observed snapshot but are labeled;
@@ -96,10 +108,7 @@ func currentEntriesForSource(source *model.PriceSource, now int64) ([]dto.Upstre
 	if err != nil {
 		return nil, err
 	}
-	stale := false
-	if run.FinishedAt != nil {
-		stale = now-*run.FinishedAt > staleThresholdSeconds(source, config.Settings)
-	}
+	stale := sourceStale(source, config.Settings, run, now)
 	// The run's observations describe the configuration it ran under; if the
 	// source has since been pointed at another channel, adapter, role, scope,
 	// or settings, they are labeled and stop counting as confirmed costs.
