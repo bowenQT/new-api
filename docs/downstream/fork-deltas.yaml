@@ -50,6 +50,7 @@ entries:
     introduced_commit: f59e9d3545a3ea0a64542b7dbfd3f5b7779f9799
     purpose: Read-only upstream price catalog (PriceSource/PriceSnapshot/PriceSyncRun models, adapter registry with the Vercel AI Gateway cost adapter, manual preview/sync, current-price query) per docs/downstream/upstream-price-catalog-spec.md Phase 1, without touching any sale-pricing configuration.
     paths:
+      - common/str.go
       - controller/upstream_price.go
       - controller/upstream_price_blackbox_test.go
       - dto/upstream_price.go
@@ -66,6 +67,8 @@ entries:
       - service/upstreamprice/adapters/vercel_gateway.go
       - service/upstreamprice/adapters/vercel_gateway_test.go
       - service/upstreamprice/catalog.go
+      - service/upstreamprice/catalog_fetch_test.go
+      - service/upstreamprice/catalog_test.go
       - service/upstreamprice/normalize.go
       - service/upstreamprice/normalize_test.go
       - service/upstreamprice/registry.go
@@ -78,6 +81,7 @@ entries:
     upstream_touchpoints:
       - GORM AutoMigrate registration in model/main.go (migrateDB and migrateDBFast lists)
       - RootAuth API route groups /api/upstream-price-sources and /api/upstream-prices in router/api-router.go
+      - shared UTF-8 safe truncation helper common.TruncateUTF8 in common/str.go, the single authority the model layer's error summary cap and the service layer's bounded identities both call
     conflict_risk: low
     verification:
       - go build ./... and go vet ./...
@@ -333,6 +337,7 @@ entries:
       - service/upstreamprice/alerts_test.go
       - service/upstreamprice/compare.go
       - service/upstreamprice/compare_test.go
+      - service/upstreamprice/cost_inversion_test.go
       - service/upstreamprice/registry_test.go
       - service/upstreamprice/schedule.go
       - service/upstreamprice/schedule_test.go
@@ -385,6 +390,7 @@ entries:
       - web/src/features/price-catalog/components/__tests__/price-source-mutate-drawer.test.tsx
       - web/src/features/price-catalog/components/__tests__/price-source-sync-dialog.test.tsx
       - web/src/features/price-catalog/components/__tests__/price-sources-panel.test.tsx
+      - web/src/features/price-catalog/components/__tests__/test-utils.tsx
       - web/src/features/price-catalog/constants.ts
       - web/src/features/price-catalog/index.tsx
       - web/src/features/price-catalog/lib/alert-detail.ts

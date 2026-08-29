@@ -752,7 +752,7 @@ Phase 2 实施口径（§21 Q6 裁决：仅后台展示 + 日志，不接通知�
 - 前五类按 run 历史在读取时派生，随 `GET /api/upstream-price-sources/alerts`、`GET /api/upstream-prices/current` 与 `POST /api/upstream-prices/compare` 返回；倒挂由 compare 在同一 usage vector 下计算，因此不出现在来源级告警端点。
 - `coverage_drop` 的判定基准是**最近一次尝试**，不是最近两次成功 run：覆盖率暴跌会被门禁拒绝，被拒的 run 记为 `failed` 且不推进 baseline，只比较成功 run 会让最需要告警的场景反而无告警。判定依据是 run 上的显式列 `coverage_drop_exceeded`（可空布尔，`nil` 表示该列存在前写入的旧行，按「不是门禁拒绝」处理），不解析 `error_summary` 文本，也不从计数反推。最近一次尝试是门禁拒绝时，与上一次成功 run 比较并置 `params.gate_refused=true`；否则退回最近两次成功 run 的比较。
 - 写日志的位置是改变目录状态的路径（写入 run 之后），不是查询路径，避免日志随后台 UI 流量放大。该位置是手工与调度**共用**的写后钩子：手工 commit、调度 commit、被门禁拒绝的 run、抓取失败的 run 和调度 plan 前失败的轻量 run 都会触发一次告警评估与日志。定时同步默认关闭，把告警日志只挂在调度路径上等于默认永不落日志。
-- 成本倒挂日志按本次写入实际置为 current 的 canonical 模型集合评估（超过单次请求上限时分批），不再对全目录做一次全量比较：手工 commit 是交互式请求，而未被本次同步触及的模型的成本不可能因这次同步而改变。
+- 成本倒挂日志按本次写入实际置为 current 的 canonical 模型集合评估（超过单次请求上限时分批），不再对全目录做一次全量比较：手工 commit 是交互式请求，而未被本次同步触及的模型的成本不可能因这次同步而改变。分批只是复用了单次比较请求的模型上限，同一次检查的各批共用一次分组解析与一次目录投影，不按批重复投影目录，也不按批重复评估来源级告警（那些告警由写后钩子单独评估一次）。分组比率不可用（非有限、越界或为负）时，这次检查与 compare 端点一样直接失败并记日志，不静默按 1 投影。
 - 每条告警在 `detail`（英文串，保持兼容）之外回带结构化 `params`，供前端本地化：`source_consecutive_failures` → `failure_count`；`source_stale` → `run_id`、`age_seconds`、`threshold_seconds`；`source_config_changed` → `run_id`；`coverage_drop` → `run_id`、`previous_valid_count`、`valid_count`、`drop_threshold`、`gate_refused`；`price_jump` → `run_id`、`source_model_name`、`dimension`、`probe_context`、`previous_usd`、`current_usd`、`change_rate`、`from_zero`、`jump_threshold`、`jump_count`、`reported_count`；`cost_inversion` → `group`。
 
 `price_jump`（单次价格变化超阈值）实施口径：
