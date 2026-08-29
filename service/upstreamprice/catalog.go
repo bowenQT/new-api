@@ -55,20 +55,33 @@ func GetCurrentUpstreamPrices(sourceId *int) (*dto.UpstreamCurrentPriceResponse,
 	}
 
 	now := common.GetTimestamp()
-	response := &dto.UpstreamCurrentPriceResponse{GeneratedAt: now}
-	for _, source := range sources {
-		entries, err := currentEntriesForSource(source, now)
-		if err != nil {
-			return nil, err
-		}
-		response.Entries = append(response.Entries, entries...)
+	entries, err := currentPriceEntries(sources, now)
+	if err != nil {
+		return nil, err
 	}
 	alerts, err := EvaluateSourceAlerts(sources, now)
 	if err != nil {
 		return nil, err
 	}
-	response.Alerts = alerts
-	return response, nil
+	return &dto.UpstreamCurrentPriceResponse{GeneratedAt: now, Entries: entries, Alerts: alerts}, nil
+}
+
+// currentPriceEntries is the entry half of the catalog projection: it labels
+// every source model of the given sources against the given time and evaluates
+// no alert at all. The comparison needs exactly this half — it raises the
+// source alerts itself, against its own generation timestamp — so keeping the
+// two separable is what stops a caller from paying for an alert evaluation it
+// discards.
+func currentPriceEntries(sources []*model.PriceSource, now int64) ([]dto.UpstreamCurrentPriceEntry, error) {
+	var entries []dto.UpstreamCurrentPriceEntry
+	for _, source := range sources {
+		sourceEntries, err := currentEntriesForSource(source, now)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, sourceEntries...)
+	}
+	return entries, nil
 }
 
 func currentEntriesForSource(source *model.PriceSource, now int64) ([]dto.UpstreamCurrentPriceEntry, error) {

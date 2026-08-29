@@ -174,12 +174,19 @@ func CompareUpstreamPrices(request *dto.UpstreamPriceCompareRequest) (*dto.Upstr
 	usage := resolveUsage(request.Usage)
 	params := usage.tokenParams()
 
-	catalog, err := GetCurrentUpstreamPrices(nil)
+	// The catalog is projected without its own alert evaluation: the comparison
+	// raises the source alerts once, at the end, against the timestamp it
+	// reports as GeneratedAt.
+	sources, err := model.GetAllPriceSources()
+	if err != nil {
+		return nil, err
+	}
+	catalogEntries, err := currentPriceEntries(sources, common.GetTimestamp())
 	if err != nil {
 		return nil, err
 	}
 	pricesByModel := make(map[string][]dto.UpstreamCurrentPriceEntry)
-	for _, entry := range catalog.Entries {
+	for _, entry := range catalogEntries {
 		if entry.CanonicalModelName == "" {
 			continue
 		}
@@ -218,10 +225,6 @@ func CompareUpstreamPrices(request *dto.UpstreamPriceCompareRequest) (*dto.Upstr
 		response.Entries = append(response.Entries, entry)
 	}
 
-	sources, err := model.GetAllPriceSources()
-	if err != nil {
-		return nil, err
-	}
 	sourceAlerts, err := EvaluateSourceAlerts(sources, response.GeneratedAt)
 	if err != nil {
 		return nil, err

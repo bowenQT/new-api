@@ -2,6 +2,7 @@ package upstreamprice
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -356,6 +357,47 @@ func TestCompareUpstreamPricesGroupSelection(t *testing.T) {
 
 func floatPtr(value float64) *float64 {
 	return &value
+}
+
+// TestCompareUpstreamPricesStaleAlertBasis pins the comparison's alerting
+// contract: its source alerts are the ones evaluated against the timestamp it
+// reports as GeneratedAt, over the sources its own catalog projection covered.
+// The margins around the threshold are wide enough that a clock tick during the
+// request cannot flip the expected verdict; the exact one-second boundary is
+// pinned deterministically in TestCatalogStaleBoundaryIsSharedByEntriesAndAlerts.
+func TestCompareUpstreamPricesStaleAlertBasis(t *testing.T) {
+	cases := []struct {
+		name      string
+		age       int64
+		wantStale bool
+	}{
+		{"an hour inside the threshold", DefaultManualStaleThresholdSeconds - 3600, false},
+		{"an hour past the threshold", DefaultManualStaleThresholdSeconds + 3600, true},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			db := setupCompareTestDB(t)
+			setupCompareSaleConfig(t)
+			channel := &model.Channel{Name: "c", Key: "k", Status: common.ChannelStatusEnabled}
+			require.NoError(t, db.Create(channel).Error)
+			seedCatalogSnapshot(t, db, "cost", RoleSupplierCost, &channel.Id, "tiered-model",
+				`tier("base", p * 1 + c * 5)`, FormulaKindTokenExprV1, "", common.GetTimestamp()-testCase.age)
+
+			response, err := CompareUpstreamPrices(&dto.UpstreamPriceCompareRequest{Models: []string{"tiered-model"}})
+			require.NoError(t, err)
+
+			sources, err := model.GetAllPriceSources()
+			require.NoError(t, err)
+			expected, err := EvaluateSourceAlerts(sources, response.GeneratedAt)
+			require.NoError(t, err)
+			assert.Equal(t, expected, response.Alerts,
+				"the comparison must report exactly the alerts of its own generation timestamp")
+
+			assert.Equal(t, testCase.wantStale, slices.Contains(alertCodeList(response.Alerts), AlertSourceStale))
+			require.Len(t, response.Entries, 1)
+			assert.Equal(t, testCase.wantStale, slices.Contains(response.Entries[0].Statuses, CompareStatusStale))
+		})
+	}
 }
 
 // TestCompareUpstreamPricesFailsClosedOnChangedSourceConfig is the §9.2 /
