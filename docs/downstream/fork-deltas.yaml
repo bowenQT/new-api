@@ -352,7 +352,7 @@ entries:
       - go test ./pkg/billingexpr/... ./service/upstreamprice/... ./model ./controller -count=1
       - billingexpr regression asserting RunExpr results and request-rule traces are unchanged by a base-expression projection, in both evaluation orders
       - scheduled sync end-to-end tests asserting byte-identical sale-pricing exports, orphan refusal, and default-off selection
-      - scheduled failure semantics tests covering the spec §8.4 table: a pre-plan failure records a lightweight failed run and reaches the consecutive-failure alert, an orphan-check database error fails the pass and backs the source off, and a commit CAS conflict neither backs off nor records a run
+      - scheduled failure semantics tests covering the spec §8.4 table — a pre-plan failure records a lightweight failed run and reaches the consecutive-failure alert, an orphan-check database error fails the pass and backs the source off, and a commit CAS conflict neither backs off nor records a run
     removal_condition: Remove only if the upstream price catalog feature is retired or upstream ships an equivalent comparison, scheduling, and reference-adapter capability.
     upstream_reference: null
 
