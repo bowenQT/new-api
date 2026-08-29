@@ -155,6 +155,72 @@ func TestCuratedReferenceBaseLLMFixture(t *testing.T) {
 	assert.Equal(t, `tier("base", p * 0.3 + c * 1.2 + cr * 0.06)`, observations[0].PriceExpr)
 }
 
+// TestCuratedReferenceConditionalFetch is the adapter half of the ETag
+// contract: a conditional fetch sends If-None-Match, a 304 answer is reported
+// as NotModified with no body read, and the validator the run keeps is the one
+// we asked about when the reply omits it.
+func TestCuratedReferenceConditionalFetch(t *testing.T) {
+	fixture, err := os.ReadFile("testdata/curated_models_dev_sample.json")
+	require.NoError(t, err)
+
+	const etag = `"curated-fixture-v1"`
+	var (
+		received     []string
+		echoETagOn30 = true
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received = append(received, r.Header.Get("If-None-Match"))
+		if r.Header.Get("If-None-Match") == etag {
+			if echoETagOn30 {
+				w.Header().Set("ETag", etag)
+			}
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("ETag", etag)
+		_, _ = w.Write(fixture)
+	}))
+	t.Cleanup(server.Close)
+
+	adapter := newCuratedAdapterForTest(ModelsDevAdapterKey, server.URL)
+	config := curatedReferenceSourceConfig(ModelsDevAdapterKey)
+
+	observations, meta, err := adapter.Fetch(context.Background(), config)
+	require.NoError(t, err)
+	require.Len(t, observations, 2)
+	assert.Equal(t, etag, meta.SourceRevision)
+	assert.False(t, meta.NotModified)
+	assert.Positive(t, meta.ResponseBytes)
+
+	observations, meta, err = adapter.FetchConditional(context.Background(), config, etag)
+	require.NoError(t, err)
+	assert.Empty(t, observations)
+	assert.True(t, meta.NotModified)
+	assert.Equal(t, http.StatusNotModified, meta.HTTPStatus)
+	assert.Zero(t, meta.ResponseBytes)
+	assert.Zero(t, meta.Discovered)
+	assert.Equal(t, etag, meta.SourceRevision)
+
+	// A 304 that omits the validator keeps the one the request carried, so the
+	// next run can still ask conditionally.
+	echoETagOn30 = false
+	_, meta, err = adapter.FetchConditional(context.Background(), config, etag)
+	require.NoError(t, err)
+	assert.True(t, meta.NotModified)
+	assert.Equal(t, etag, meta.SourceRevision)
+
+	// A revision that is not a well-formed entity-tag — a value truncated to
+	// the source_revision column width, say — degrades to a full fetch instead
+	// of putting a malformed header on the wire.
+	received = nil
+	observations, meta, err = adapter.FetchConditional(context.Background(), config, `"truncated-without-closing-quote`)
+	require.NoError(t, err)
+	require.Len(t, observations, 2)
+	assert.False(t, meta.NotModified)
+	assert.Equal(t, []string{""}, received)
+}
+
 // TestCuratedReferenceRejectsNonDecimalPrices: source prices reach the decimal
 // validator as their exact JSON text, so exponent notation and non-numeric
 // values fail closed rather than being coerced.

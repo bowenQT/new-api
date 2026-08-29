@@ -320,7 +320,7 @@ entries:
     status: active
     owner: downstream-maintainers
     introduced_commit: 53c316bc182853892af75b693c9d4d9150e47aa7
-    purpose: Phase 2 of the upstream price catalog per docs/downstream/upstream-price-catalog-spec.md — billingexpr base-expression projection, the RootAuth cost/sale/margin comparison endpoint, scheduled catalog sync on the existing SystemTask runner (off by default), catalog health alerts, the models.dev / basellm curated reference adapters, the RootAuth adapter listing endpoint, the RootAuth source-level alerts endpoint that lets the source list render §13 health alerts without the current-price projection, and the §8.3 freshness fields on the source list and comparison responses. It reads sale-pricing configuration for the comparison projection and still writes none of it.
+    purpose: Phase 2 of the upstream price catalog per docs/downstream/upstream-price-catalog-spec.md — billingexpr base-expression projection, the RootAuth cost/sale/margin comparison endpoint, scheduled catalog sync on the existing SystemTask runner (off by default), catalog health alerts, the models.dev / basellm curated reference adapters and their ETag conditional fetching (spec §8.1 — a 304 replays the baseline run instead of re-downloading and re-normalizing the catalog), the RootAuth adapter listing endpoint, the RootAuth source-level alerts endpoint that lets the source list render §13 health alerts without the current-price projection, and the §8.3 freshness fields on the source list and comparison responses. It reads sale-pricing configuration for the comparison projection and still writes none of it.
     paths:
       - pkg/billingexpr/compile.go
       - pkg/billingexpr/project.go
@@ -336,6 +336,7 @@ entries:
       - service/upstreamprice/schedule_test.go
       - service/upstreamprice/source_test.go
       - service/upstreamprice/adapters/catalog_alerting_test.go
+      - service/upstreamprice/adapters/conditional_sync_test.go
       - service/upstreamprice/adapters/curated_reference.go
       - service/upstreamprice/adapters/curated_reference_test.go
       - service/upstreamprice/adapters/scheduled_sync_test.go
@@ -354,6 +355,7 @@ entries:
       - scheduled sync end-to-end tests asserting byte-identical sale-pricing exports, orphan refusal, and default-off selection
       - source-alerts equivalence regression asserting GET /api/upstream-price-sources/alerts returns item-for-item the same alerts as the current-price projection for the same catalog state
       - scheduled failure semantics tests covering the spec §8.4 table — a pre-plan failure records a lightweight failed run and reaches the consecutive-failure alert, an orphan-check database error fails the pass and backs the source off, and a commit CAS conflict neither backs off nor records a run
+      - conditional-fetch tests covering spec §8.1 — a 304 second sync downloads nothing and replays the baseline manifest onto the same snapshot ids with an identical current/missing catalog judgment, a partial baseline replays as partial, a moved config digest or a stale snapshot fingerprint_version forces a full fetch, an upstream without an ETag stays on the full path, and a preview/commit representation divergence is refused as a digest mismatch
     removal_condition: Remove only if the upstream price catalog feature is retired or upstream ships an equivalent comparison, scheduling, and reference-adapter capability.
     upstream_reference: null
 
