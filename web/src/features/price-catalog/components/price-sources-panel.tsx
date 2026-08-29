@@ -45,6 +45,7 @@ import {
 } from '../api'
 import {
   ADAPTER_LABELS,
+  ALERT_PRICE_JUMP,
   ALERT_SOURCE_CONFIG_CHANGED,
   MIN_SCHEDULE_INTERVAL_SECONDS,
   priceCatalogQueryKeys,
@@ -315,6 +316,9 @@ export function PriceSourcesPanel() {
                                 sourceConfigChanged: sourceAlerts.some(
                                   (alert) =>
                                     alert.code === ALERT_SOURCE_CONFIG_CHANGED
+                                ),
+                                priceJump: sourceAlerts.some(
+                                  (alert) => alert.code === ALERT_PRICE_JUMP
                                 ),
                               }}
                               className='flex flex-wrap gap-1'

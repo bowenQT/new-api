@@ -5495,6 +5495,16 @@
     "The coverage gate refused run #{{runId}}. Valid model coverage would have fallen from {{previous}} to {{current}} models, past the {{gate}} drop gate, so nothing was written.": "カバレッジゲートが実行 #{{runId}} を拒否しました。有効モデル数が {{previous}} から {{current}} へ減少し、{{gate}} の低下ゲートを超えるため、何も書き込まれていません。",
     "Unnormalized source pricing dimensions: {{dimensions}}": "正規化されていないソースの価格次元: {{dimensions}}",
     "Source is disabled": "ソースは無効です",
-    "This source is disabled. Preview stays available for diagnosis, but the server refuses to commit a sync until the source is enabled again.": "このソースは無効になっています。診断用のプレビューは利用できますが、再度有効にするまでサーバーは同期のコミットを拒否します。"
+    "This source is disabled. Preview stays available for diagnosis, but the server refuses to commit a sync until the source is enabled again.": "このソースは無効になっています。診断用のプレビューは利用できますが、再度有効にするまでサーバーは同期のコミットを拒否します。",
+    "Cache read": "キャッシュ読み取り",
+    "Per call": "リクエスト単位",
+    "Unverified expression": "検証できない式",
+    "Upstream price changed sharply": "上流価格が大きく変動",
+    "Sharp price change, needs review": "価格が大きく変動、要確認",
+    "The {{dimension}} price of {{model}} moved from {{previous}} to {{current}} ({{rate}}) at {{context}}.": "{{model}} の{{dimension}}価格が {{context}} で {{previous}} から {{current}}（{{rate}}）に変化しました。",
+    "The {{dimension}} price of {{model}} moved from zero to {{current}} at {{context}}.": "{{model}} の{{dimension}}価格が {{context}} で 0 から {{current}} に変化しました。",
+    "The price of {{model}} changed in a way this check could not measure. Review it manually.": "{{model}} の価格が本チェックでは測定できない形で変化しました。手動で確認してください。",
+    "{{count}} further price change(s) were recorded but are not listed.": "ほかに {{count}} 件の価格変化が記録されていますが、ここには表示されていません。",
+    "This sync would record {{count}} price change(s) past the configured threshold. The commit is not blocked; review the changed models afterwards.": "この同期では、しきい値を超える価格変化が {{count}} 件記録されます。コミットは妨げられません。同期後に該当モデルを確認してください。"
   }
 }

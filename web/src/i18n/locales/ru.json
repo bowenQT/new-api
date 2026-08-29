@@ -5495,6 +5495,16 @@
     "The coverage gate refused run #{{runId}}. Valid model coverage would have fallen from {{previous}} to {{current}} models, past the {{gate}} drop gate, so nothing was written.": "Контроль покрытия отклонил запуск №{{runId}}. Покрытие валидных моделей упало бы с {{previous}} до {{current}}, что превышает порог падения {{gate}}, поэтому ничего не записано.",
     "Unnormalized source pricing dimensions: {{dimensions}}": "Ненормализованные ценовые измерения источника: {{dimensions}}",
     "Source is disabled": "Источник отключён",
-    "This source is disabled. Preview stays available for diagnosis, but the server refuses to commit a sync until the source is enabled again.": "Этот источник отключён. Предпросмотр остаётся доступным для диагностики, но сервер отклонит фиксацию синхронизации, пока источник не будет включён снова."
+    "This source is disabled. Preview stays available for diagnosis, but the server refuses to commit a sync until the source is enabled again.": "Этот источник отключён. Предпросмотр остаётся доступным для диагностики, но сервер отклонит фиксацию синхронизации, пока источник не будет включён снова.",
+    "Cache read": "Чтение кэша",
+    "Per call": "За вызов",
+    "Unverified expression": "Выражение не проверено",
+    "Upstream price changed sharply": "Цена поставщика резко изменилась",
+    "Sharp price change, needs review": "Резкое изменение цены, требуется проверка",
+    "The {{dimension}} price of {{model}} moved from {{previous}} to {{current}} ({{rate}}) at {{context}}.": "Цена {{dimension}} для {{model}} изменилась с {{previous}} до {{current}} ({{rate}}) при {{context}}.",
+    "The {{dimension}} price of {{model}} moved from zero to {{current}} at {{context}}.": "Цена {{dimension}} для {{model}} изменилась с нуля до {{current}} при {{context}}.",
+    "The price of {{model}} changed in a way this check could not measure. Review it manually.": "Цена {{model}} изменилась так, что эта проверка не смогла измерить изменение. Проверьте вручную.",
+    "{{count}} further price change(s) were recorded but are not listed.": "Ещё изменений цен записано, но не показано: {{count}}.",
+    "This sync would record {{count}} price change(s) past the configured threshold. The commit is not blocked; review the changed models afterwards.": "Эта синхронизация запишет изменений цен сверх заданного порога: {{count}}. Фиксация не блокируется — проверьте изменённые модели после неё."
   }
 }

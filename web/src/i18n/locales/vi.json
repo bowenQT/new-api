@@ -5495,6 +5495,16 @@
     "The coverage gate refused run #{{runId}}. Valid model coverage would have fallen from {{previous}} to {{current}} models, past the {{gate}} drop gate, so nothing was written.": "Cổng độ phủ đã từ chối lần chạy #{{runId}}. Độ phủ mô hình hợp lệ sẽ giảm từ {{previous}} xuống {{current}}, vượt ngưỡng giảm {{gate}}, nên không có dữ liệu nào được ghi.",
     "Unnormalized source pricing dimensions: {{dimensions}}": "Chiều giá của nguồn chưa được chuẩn hóa: {{dimensions}}",
     "Source is disabled": "Nguồn đã bị tắt",
-    "This source is disabled. Preview stays available for diagnosis, but the server refuses to commit a sync until the source is enabled again.": "Nguồn này đã bị tắt. Bản xem trước vẫn dùng được để chẩn đoán, nhưng máy chủ sẽ từ chối ghi nhận đồng bộ cho đến khi nguồn được bật lại."
+    "This source is disabled. Preview stays available for diagnosis, but the server refuses to commit a sync until the source is enabled again.": "Nguồn này đã bị tắt. Bản xem trước vẫn dùng được để chẩn đoán, nhưng máy chủ sẽ từ chối ghi nhận đồng bộ cho đến khi nguồn được bật lại.",
+    "Cache read": "Đọc cache",
+    "Per call": "Theo lượt gọi",
+    "Unverified expression": "Biểu thức chưa xác minh",
+    "Upstream price changed sharply": "Giá thượng nguồn thay đổi mạnh",
+    "Sharp price change, needs review": "Giá thay đổi mạnh, cần rà soát",
+    "The {{dimension}} price of {{model}} moved from {{previous}} to {{current}} ({{rate}}) at {{context}}.": "Giá {{dimension}} của {{model}} đã đổi từ {{previous}} sang {{current}} ({{rate}}) tại {{context}}.",
+    "The {{dimension}} price of {{model}} moved from zero to {{current}} at {{context}}.": "Giá {{dimension}} của {{model}} đã đổi từ 0 sang {{current}} tại {{context}}.",
+    "The price of {{model}} changed in a way this check could not measure. Review it manually.": "Giá của {{model}} đã thay đổi theo cách kiểm tra này không đo được. Hãy rà soát thủ công.",
+    "{{count}} further price change(s) were recorded but are not listed.": "Còn {{count}} thay đổi giá đã được ghi nhận nhưng không liệt kê ở đây.",
+    "This sync would record {{count}} price change(s) past the configured threshold. The commit is not blocked; review the changed models afterwards.": "Lần đồng bộ này sẽ ghi nhận {{count}} thay đổi giá vượt ngưỡng đã cấu hình. Việc ghi nhận không bị chặn; hãy rà soát các mô hình đó sau đó."
   }
 }

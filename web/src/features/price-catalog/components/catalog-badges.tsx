@@ -90,6 +90,7 @@ export type CatalogFlags = {
   variesByProvider?: boolean
   costInverted?: boolean
   sourceConfigChanged?: boolean
+  priceJump?: boolean
 }
 
 /**
@@ -97,7 +98,10 @@ export type CatalogFlags = {
  * (spec §11.1, §11.2). `varies_by_provider` carries the mandatory wording from
  * spec §6.2 so such an observation is never presented as a confirmed cost, and
  * `source_config_changed` states why an observation taken under an older source
- * configuration is no longer a confirmed cost (spec §7.3, §9.2).
+ * configuration is no longer a confirmed cost (spec §7.3, §9.2). `priceJump`
+ * marks a source whose last successful sync recorded a sharp price movement: the
+ * sync itself succeeded, so nothing else on the row would say the committed
+ * prices are worth a second look (spec §13).
  */
 export function CatalogFlagBadges(props: {
   flags: CatalogFlags
@@ -112,7 +116,8 @@ export function CatalogFlagBadges(props: {
     flags.canonicalConflict ||
     flags.variesByProvider ||
     flags.costInverted ||
-    flags.sourceConfigChanged
+    flags.sourceConfigChanged ||
+    flags.priceJump
 
   if (!hasAny) return null
 
@@ -134,6 +139,9 @@ export function CatalogFlagBadges(props: {
             'Source configuration changed, cost is not confirmed until the next sync'
           )}
         </Badge>
+      )}
+      {flags.priceJump && (
+        <Badge variant='warning'>{t('Sharp price change, needs review')}</Badge>
       )}
       {flags.missing && (
         <Badge variant='warning'>{t('Missing upstream')}</Badge>

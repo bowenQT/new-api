@@ -5495,6 +5495,16 @@
     "The coverage gate refused run #{{runId}}. Valid model coverage would have fallen from {{previous}} to {{current}} models, past the {{gate}} drop gate, so nothing was written.": "覆蓋率閘門拒絕了執行 #{{runId}}。有效模型覆蓋數將從 {{previous}} 降至 {{current}}，超過 {{gate}} 的下降閘門，因此本次未寫入任何資料。",
     "Unnormalized source pricing dimensions: {{dimensions}}": "來源含未正規化的價格維度：{{dimensions}}",
     "Source is disabled": "來源已停用",
-    "This source is disabled. Preview stays available for diagnosis, but the server refuses to commit a sync until the source is enabled again.": "該來源已停用。預覽仍可用於排查，但在重新啟用之前，伺服器會拒絕提交同步。"
+    "This source is disabled. Preview stays available for diagnosis, but the server refuses to commit a sync until the source is enabled again.": "該來源已停用。預覽仍可用於排查，但在重新啟用之前，伺服器會拒絕提交同步。",
+    "Cache read": "緩存讀取",
+    "Per call": "按次計費",
+    "Unverified expression": "表達式未能核驗",
+    "Upstream price changed sharply": "上游價格大幅變化",
+    "Sharp price change, needs review": "價格大幅變化，需複核",
+    "The {{dimension}} price of {{model}} moved from {{previous}} to {{current}} ({{rate}}) at {{context}}.": "{{model}} 的{{dimension}}價格在 {{context}} 下從 {{previous}} 變為 {{current}}（{{rate}}）。",
+    "The {{dimension}} price of {{model}} moved from zero to {{current}} at {{context}}.": "{{model}} 的{{dimension}}價格在 {{context}} 下從 0 變為 {{current}}。",
+    "The price of {{model}} changed in a way this check could not measure. Review it manually.": "{{model}} 的價格發生了本次檢查無法測量的變化，請人工複核。",
+    "{{count}} further price change(s) were recorded but are not listed.": "另有 {{count}} 項價格變化已記錄但未在此列出。",
+    "This sync would record {{count}} price change(s) past the configured threshold. The commit is not blocked; review the changed models afterwards.": "本次同步會記錄 {{count}} 項超過閾值的價格變化。提交不會被阻斷，請在同步後複核這些模型。"
   }
 }

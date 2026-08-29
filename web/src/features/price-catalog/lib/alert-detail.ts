@@ -21,11 +21,14 @@ import type { TFunction } from 'i18next'
 import {
   ALERT_COST_INVERSION,
   ALERT_COVERAGE_DROP,
+  ALERT_PRICE_JUMP,
   ALERT_SOURCE_CONFIG_CHANGED,
   ALERT_SOURCE_CONSECUTIVE_FAILURES,
   ALERT_SOURCE_STALE,
+  PRICE_JUMP_DIMENSION_EXPR_UNVERIFIED,
+  PRICE_JUMP_DIMENSION_LABEL_KEYS,
 } from '../constants'
-import type { PriceAlert } from '../types'
+import type { PriceAlert, PriceAlertParams } from '../types'
 
 /** Alert durations are reported in seconds; the admin reads them in hours. */
 function hoursOf(seconds: number): string {
@@ -35,6 +38,66 @@ function hoursOf(seconds: number): string {
 /** The coverage gate is a drop fraction; it is shown as a percentage. */
 function percentOf(fraction: number): string {
   return `${(fraction * 100).toFixed(2)}%`
+}
+
+/**
+ * Catalog amounts are USD per million tokens for a token price and USD per
+ * request for a per-call one, and both can be small enough that two decimals
+ * round them to zero, so the amount is shown with enough significant digits to
+ * stay a number the admin can compare.
+ */
+function usdOf(amount: number): string {
+  return `$${Number(amount.toPrecision(6))}`
+}
+
+/**
+ * Localized detail of one price movement (spec §13). The dimension that could
+ * not be measured gets its own wording: it states no rate, so rendering it in
+ * the sentence the measured movements use would imply a magnitude that was
+ * never established.
+ */
+function priceJumpDetail(t: TFunction, params: PriceAlertParams): string {
+  const model = params.source_model_name ?? ''
+  if (params.dimension === PRICE_JUMP_DIMENSION_EXPR_UNVERIFIED) {
+    return t(
+      'The price of {{model}} changed in a way this check could not measure. Review it manually.',
+      { model }
+    )
+  }
+  const dimension = t(
+    PRICE_JUMP_DIMENSION_LABEL_KEYS[params.dimension ?? ''] ??
+      params.dimension ??
+      ''
+  )
+  if (params.from_zero === true && params.current_usd !== undefined) {
+    return t(
+      'The {{dimension}} price of {{model}} moved from zero to {{current}} at {{context}}.',
+      {
+        dimension,
+        model,
+        current: usdOf(params.current_usd),
+        context: params.probe_context ?? '',
+      }
+    )
+  }
+  if (
+    params.previous_usd === undefined ||
+    params.current_usd === undefined ||
+    params.change_rate === undefined
+  ) {
+    return ''
+  }
+  return t(
+    'The {{dimension}} price of {{model}} moved from {{previous}} to {{current}} ({{rate}}) at {{context}}.',
+    {
+      dimension,
+      model,
+      previous: usdOf(params.previous_usd),
+      current: usdOf(params.current_usd),
+      rate: percentOf(params.change_rate),
+      context: params.probe_context ?? '',
+    }
+  )
 }
 
 /**
@@ -107,6 +170,12 @@ export function priceAlertDetail(t: TFunction, alert: PriceAlert): string {
       'Valid model coverage fell from {{previous}} to {{current}} models, past the {{gate}} drop gate.',
       values
     )
+  }
+
+  if (alert.code === ALERT_PRICE_JUMP && params.dimension !== undefined) {
+    // A movement missing the amounts it is built from cannot be described
+    // locally; the backend sentence is then the only complete statement of it.
+    return priceJumpDetail(t, params) || alert.detail
   }
 
   if (alert.code === ALERT_COST_INVERSION && params.group !== undefined) {

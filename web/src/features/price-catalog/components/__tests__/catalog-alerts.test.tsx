@@ -17,13 +17,31 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { render, screen } from '@testing-library/react'
-import i18next from 'i18next'
+import i18next, { createInstance } from 'i18next'
+import type { ReactElement } from 'react'
+import { I18nextProvider, initReactI18next } from 'react-i18next'
 import { afterEach, describe, expect, test } from 'vitest'
 
 import zhLocale from '@/i18n/locales/zh.json'
 
 import type { PriceAlert } from '../../types'
 import { CatalogAlerts } from '../catalog-alerts'
+
+// Source model names carry slashes, so this instance mirrors the app's
+// `escapeValue: false` (src/i18n/config.ts); the shared test setup would
+// otherwise HTML-escape every one of them.
+const unescapedI18n = createInstance()
+await unescapedI18n.use(initReactI18next).init({
+  lng: 'en',
+  resources: { en: { translation: {} } },
+  interpolation: { escapeValue: false },
+})
+
+function renderUnescaped(element: ReactElement) {
+  return render(
+    <I18nextProvider i18n={unescapedI18n}>{element}</I18nextProvider>
+  )
+}
 
 function coverageDropAlert(gateRefused: boolean): PriceAlert {
   return {
@@ -117,6 +135,111 @@ describe('catalog alerts', () => {
       screen.getByText(
         'worst cost exceeds the projected sale price for group "vip"',
         { exact: false }
+      )
+    ).toBeInTheDocument()
+  })
+
+  test('describes a price movement from its parameters, naming the source model', () => {
+    renderUnescaped(
+      <CatalogAlerts
+        alerts={[
+          {
+            code: 'price_jump',
+            source_id: 1,
+            source_name: 'Vercel gateway cost',
+            canonical_model_name: 'gpt-5.6-luna',
+            detail: 'run 12 moved the input price of "openai/gpt-5.6-luna"',
+            params: {
+              run_id: 12,
+              source_model_name: 'openai/gpt-5.6-luna',
+              dimension: 'input',
+              probe_context: 'p=1000000,len=1000',
+              previous_usd: 0.2,
+              current_usd: 2,
+              change_rate: 9,
+              jump_threshold: 0.5,
+              jump_count: 1,
+              reported_count: 1,
+            },
+          },
+        ]}
+      />
+    )
+
+    expect(
+      screen.getByText(
+        'The Input price of openai/gpt-5.6-luna moved from $0.2 to $2 (900.00%) at p=1000000,len=1000.',
+        { exact: false }
+      )
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText('Upstream price changed sharply')
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/not listed/)).toBeNull()
+  })
+
+  // The fail-closed dimension states no rate, so it must not be rendered in the
+  // sentence measured movements use — that would imply a magnitude nobody
+  // established.
+  test('asks for a manual review when the movement could not be measured', () => {
+    renderUnescaped(
+      <CatalogAlerts
+        alerts={[
+          {
+            code: 'price_jump',
+            source_id: 1,
+            source_name: 'Vercel gateway cost',
+            detail:
+              'run 12 changed the price in a way this check could not measure',
+            params: {
+              run_id: 12,
+              source_model_name: 'openai/gpt-5.6-luna',
+              dimension: 'expr_unverified',
+              jump_count: 1,
+              reported_count: 1,
+            },
+          },
+        ]}
+      />
+    )
+
+    expect(
+      screen.getByText(
+        'The price of openai/gpt-5.6-luna changed in a way this check could not measure. Review it manually.',
+        { exact: false }
+      )
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/%/)).toBeNull()
+  })
+
+  // A run that repriced a whole source stores only its largest movements. The
+  // list has to say so once, or the sample reads as the whole change.
+  test('states how many recorded price movements the list leaves out', () => {
+    renderUnescaped(
+      <CatalogAlerts
+        alerts={[0, 1].map((index) => ({
+          code: 'price_jump',
+          source_id: 1,
+          source_name: 'Vercel gateway cost',
+          detail: 'moved',
+          params: {
+            run_id: 12,
+            source_model_name: `vendor/model-${index}`,
+            dimension: 'input',
+            probe_context: 'p=1000000,len=1000',
+            previous_usd: 1,
+            current_usd: 4,
+            change_rate: 3,
+            jump_count: 137,
+            reported_count: 2,
+          },
+        }))}
+      />
+    )
+
+    expect(
+      screen.getByText(
+        '135 further price change(s) were recorded but are not listed.'
       )
     ).toBeInTheDocument()
   })

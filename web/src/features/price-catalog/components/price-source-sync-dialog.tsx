@@ -324,6 +324,24 @@ export function PriceSourceSyncDialog(props: Props) {
                 </Alert>
               )}
 
+              {/*
+                Not a destructive alert: unlike the coverage gate above, a price
+                movement never refuses the commit, and styling it as a refusal
+                would tell the admin the sync is about to fail.
+              */}
+              {preview.price_jump_count > 0 && (
+                <Alert>
+                  <TriangleAlert aria-hidden='true' />
+                  <AlertTitle>{t('Upstream price changed sharply')}</AlertTitle>
+                  <AlertDescription>
+                    {t(
+                      'This sync would record {{count}} price change(s) past the configured threshold. The commit is not blocked; review the changed models afterwards.',
+                      { count: preview.price_jump_count }
+                    )}
+                  </AlertDescription>
+                </Alert>
+              )}
+
               <div className='grid grid-cols-2 gap-2 sm:grid-cols-4'>
                 <SummaryStat
                   label={t('Discovered')}
