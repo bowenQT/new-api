@@ -170,10 +170,10 @@ type compareBasis struct {
 // refused on that ground rather than silently projected at 1 — a corrupt group
 // ratio would otherwise turn every margin computed against it into a fiction.
 //
-// The catalog is projected without its own alert evaluation; the registered
-// sources are returned alongside the basis because a caller that reports source
-// alerts must evaluate them over the same set this projection covered.
-func newCompareBasis(requestedGroup string, requestedUsage *dto.UpstreamPriceUsageVector) (*compareBasis, []*model.PriceSource, error) {
+// The catalog is projected without its own alert evaluation: a caller that
+// reports source alerts evaluates them against its own fresh read of the
+// registered sources, not against the read this projection happened to use.
+func newCompareBasis(requestedGroup string, requestedUsage *dto.UpstreamPriceUsageVector) (*compareBasis, error) {
 	group := strings.TrimSpace(requestedGroup)
 	if group == "" {
 		group = DefaultCompareGroup
@@ -184,16 +184,16 @@ func newCompareBasis(requestedGroup string, requestedUsage *dto.UpstreamPriceUsa
 		groupRatio = ratio_setting.GetGroupRatio(group)
 	}
 	if _, ok := boundedUSD(groupRatio); !ok || groupRatio < 0 {
-		return nil, nil, fmt.Errorf("group %q has an unusable group ratio", group)
+		return nil, fmt.Errorf("group %q has an unusable group ratio", group)
 	}
 
 	sources, err := model.GetAllPriceSources()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	catalogEntries, err := currentPriceEntries(sources, common.GetTimestamp())
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	pricesByModel := make(map[string][]dto.UpstreamCurrentPriceEntry)
 	for _, entry := range catalogEntries {
@@ -211,7 +211,7 @@ func newCompareBasis(requestedGroup string, requestedUsage *dto.UpstreamPriceUsa
 		usage:           usage,
 		params:          usage.tokenParams(),
 		pricesByModel:   pricesByModel,
-	}, sources, nil
+	}, nil
 }
 
 // compare builds the comparison entries of the named models together with the
@@ -245,7 +245,7 @@ func CompareUpstreamPrices(request *dto.UpstreamPriceCompareRequest) (*dto.Upstr
 		return nil, err
 	}
 
-	basis, sources, err := newCompareBasis(request.Group, request.Usage)
+	basis, err := newCompareBasis(request.Group, request.Usage)
 	if err != nil {
 		return nil, err
 	}
@@ -271,6 +271,17 @@ func CompareUpstreamPrices(request *dto.UpstreamPriceCompareRequest) (*dto.Upstr
 		Alerts:          alerts,
 	}
 
+	// Source alerts are evaluated against a fresh read of the registered
+	// sources, not against the read the projection above used. Projecting a
+	// whole catalog issues many queries, and an administrator repointing a
+	// source while it runs is exactly what source_config_changed exists to
+	// report: reusing the earlier read would describe the configuration as it
+	// stood before that change and silently withhold the alert that says the
+	// projected costs are no longer confirmed.
+	sources, err := model.GetAllPriceSources()
+	if err != nil {
+		return nil, err
+	}
 	sourceAlerts, err := EvaluateSourceAlerts(sources, response.GeneratedAt)
 	if err != nil {
 		return nil, err

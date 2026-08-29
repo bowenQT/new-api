@@ -295,12 +295,18 @@ func LogCatalogAlertsAfterWrite(ctx context.Context, sourceId int, canonicalMode
 // request-sized batches so a source larger than the per-request cap is still
 // covered end to end, but the batches share one projection basis: the batch
 // size is the unit the comparison is specified in, not a reason to re-read the
-// whole catalog and re-evaluate every source alert per batch.
+// whole catalog per batch.
+//
+// This path evaluates no source-level alert, so unlike CompareUpstreamPrices it
+// needs no second read of the registered sources: a cost inversion is a
+// model-level comparison of a projected cost against the sale price, and the
+// caller has already evaluated and logged the source alerts of the source this
+// write touched.
 func logCostInversionAlerts(ctx context.Context, canonicalModels []string) {
 	if len(canonicalModels) == 0 {
 		return
 	}
-	basis, _, err := newCompareBasis("", nil)
+	basis, err := newCompareBasis("", nil)
 	if err != nil {
 		common.SysError(fmt.Sprintf("upstream price cost inversion check failed: %v", err))
 		return

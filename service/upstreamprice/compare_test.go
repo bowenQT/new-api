@@ -472,6 +472,72 @@ func TestCompareUpstreamPricesFailsClosedOnChangedSourceConfig(t *testing.T) {
 	assert.NotContains(t, restored.Statuses, CompareStatusSourceConfigChanged)
 }
 
+// TestCompareEvaluatesSourceAlertsOnAFreshSourceRead pins that a comparison
+// evaluates its source alerts against the source configuration in effect when
+// the alerts are evaluated, not against the read its catalog projection used.
+//
+// Projecting a catalog issues many queries, so an administrator repointing a
+// source while a comparison runs is a real interleaving, and it is exactly what
+// source_config_changed exists to report: the projected costs stopped being
+// confirmed. The interleaving is injected deterministically — the adapter key is
+// changed the moment the first read of price_sources returns, so the projection
+// runs on the configuration read before it and only the alert evaluation can see
+// the change.
+func TestCompareEvaluatesSourceAlertsOnAFreshSourceRead(t *testing.T) {
+	db := setupCompareTestDB(t)
+	now := common.GetTimestamp()
+
+	channel := &model.Channel{Name: "fresh-read-channel", Key: "k", Status: common.ChannelStatusEnabled}
+	require.NoError(t, db.Create(channel).Error)
+	source := seedCatalogSnapshot(t, db, "fresh-read-cost", RoleSupplierCost, &channel.Id, "fresh-read-model",
+		`tier("base", p * 1 + c * 2)`, FormulaKindTokenExprV1, "", now)
+
+	// The seeded run recorded the configuration it ran under, so nothing is
+	// changed yet.
+	baseline, err := CompareUpstreamPrices(&dto.UpstreamPriceCompareRequest{Models: []string{"fresh-read-model"}})
+	require.NoError(t, err)
+	for _, alert := range baseline.Alerts {
+		assert.NotEqual(t, AlertSourceConfigChanged, alert.Code)
+	}
+
+	sourceReads := 0
+	require.NoError(t, db.Callback().Query().After("gorm:query").Register("test:repoint_source", func(tx *gorm.DB) {
+		if !strings.Contains(tx.Statement.SQL.String(), "price_sources") {
+			return
+		}
+		sourceReads++
+		if sourceReads > 1 {
+			return
+		}
+		require.NoError(t, model.DB.Model(&model.PriceSource{}).Where("id = ?", source.Id).
+			Update("adapter_key", "repointed_adapter").Error)
+	}))
+	t.Cleanup(func() {
+		_ = db.Callback().Query().After("gorm:query").Remove("test:repoint_source")
+	})
+
+	response, err := CompareUpstreamPrices(&dto.UpstreamPriceCompareRequest{Models: []string{"fresh-read-model"}})
+	require.NoError(t, err)
+	assert.Equal(t, 2, sourceReads,
+		"the comparison must read the registered sources again before evaluating their alerts")
+
+	changed := false
+	for _, alert := range response.Alerts {
+		if alert.Code == AlertSourceConfigChanged && alert.SourceId == source.Id {
+			changed = true
+		}
+	}
+	assert.True(t, changed,
+		"a source repointed during the projection must still raise source_config_changed")
+
+	// The projection itself ran on the configuration read before the change, so
+	// the entry is the pre-change one; the alert is what tells the admin the
+	// projected cost is no longer confirmed.
+	require.Len(t, response.Entries, 1)
+	require.Len(t, response.Entries[0].Costs, 1)
+	assert.False(t, response.Entries[0].Costs[0].SourceConfigChanged)
+}
+
 // TestCompareSourcePriceCarriesSnapshotTimestamps pins that a comparison row
 // reports the underlying snapshot's own fetched_at and effective_at, so a
 // caller can label observation age and vendor effective date (spec §8.3)
