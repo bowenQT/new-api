@@ -37,7 +37,7 @@ export const Route = createFileRoute('/_authenticated/price-catalog/$section')({
       })
     }
 
-    const validSections = PRICE_CATALOG_SECTION_IDS as unknown as string[]
+    const validSections: readonly string[] = PRICE_CATALOG_SECTION_IDS
     if (!validSections.includes(params.section)) {
       throw redirect({
         to: '/price-catalog/$section',

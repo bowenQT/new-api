@@ -39,6 +39,7 @@ import {
 import { useTranslation } from 'react-i18next'
 
 import type { SidebarData } from '@/components/layout/types'
+import { PRICE_CATALOG_SECTION_TITLE_KEYS } from '@/features/price-catalog/section-registry'
 import { ROLE } from '@/lib/roles'
 
 /**
@@ -132,13 +133,13 @@ export function useSidebarData(): SidebarData {
             icon: Box,
           },
           {
-            title: t('Price Sources'),
+            title: t(PRICE_CATALOG_SECTION_TITLE_KEYS.sources),
             url: '/price-catalog/sources',
             icon: DatabaseZap,
             requiredRole: ROLE.SUPER_ADMIN,
           },
           {
-            title: t('Price Comparison'),
+            title: t(PRICE_CATALOG_SECTION_TITLE_KEYS.compare),
             url: '/price-catalog/compare',
             icon: Scale,
             requiredRole: ROLE.SUPER_ADMIN,
