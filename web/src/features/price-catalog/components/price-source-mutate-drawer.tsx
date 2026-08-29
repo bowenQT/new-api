@@ -119,23 +119,29 @@ export function PriceSourceMutateDrawer(props: Props) {
     defaultValues: PRICE_SOURCE_FORM_DEFAULTS,
   })
 
+  // Opening the drawer establishes the baseline the admin edits from: the
+  // stored source, or a blank new one. Only opening does this, so a later
+  // reset can never discard what the admin has already typed.
   useEffect(() => {
     if (!props.open) return
-    if (props.source) {
-      form.reset(priceSourceToFormValues(props.source))
-      return
-    }
-    const first = adapters[0]
     form.reset(
-      first
-        ? {
-            ...PRICE_SOURCE_FORM_DEFAULTS,
-            adapter_key: first.key,
-            role: first.allowed_roles[0] ?? '',
-            scope: first.allowed_scopes[0] ?? '',
-          }
+      props.source
+        ? priceSourceToFormValues(props.source)
         : PRICE_SOURCE_FORM_DEFAULTS
     )
+  }, [form, props.open, props.source])
+
+  // The registry answers after the drawer is interactive, so it only fills the
+  // contract a new source has not got yet: the adapter and the role and scope
+  // that adapter admits. A stored source already carries its own, and an
+  // adapter the admin has since chosen stands.
+  useEffect(() => {
+    if (!props.open || props.source) return
+    const first = adapters[0]
+    if (!first || form.getValues('adapter_key') !== '') return
+    form.setValue('adapter_key', first.key)
+    form.setValue('role', first.allowed_roles[0] ?? '')
+    form.setValue('scope', first.allowed_scopes[0] ?? '')
   }, [adapters, form, props.open, props.source])
 
   const adapterKey = form.watch('adapter_key')

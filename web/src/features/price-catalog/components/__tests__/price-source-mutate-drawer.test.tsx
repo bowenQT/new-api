@@ -104,17 +104,31 @@ function installAdapters(adapters: PriceAdapterView[] | Error) {
   })
 }
 
-function renderDrawer(source?: PriceSourceView) {
-  return renderWithQueryClient(
+function drawerTree(source?: PriceSourceView, open = true) {
+  return (
     <I18nextProvider i18n={i18n}>
       <PriceSourceMutateDrawer
-        open
+        open={open}
         onOpenChange={() => undefined}
         source={source}
         onSaved={() => undefined}
       />
     </I18nextProvider>
   )
+}
+
+function renderDrawer(source?: PriceSourceView) {
+  const rendered = renderWithQueryClient(drawerTree(source))
+  return {
+    ...rendered,
+    setOpen: (open: boolean) => rendered.rerender(drawerTree(source, open)),
+  }
+}
+
+function nameInput(): HTMLInputElement {
+  return screen.getByPlaceholderText(
+    'e.g. Vercel gateway cost'
+  ) as HTMLInputElement
 }
 
 /**
@@ -214,6 +228,43 @@ describe('price source mutate drawer', () => {
       )
     ).toBeInTheDocument()
     expect(labelText('Channel ID')).toBeNull()
+  })
+
+  test('keeps what the admin typed before the adapter registry answered', async () => {
+    let publishAdapters: (adapters: PriceAdapterView[]) => void = () =>
+      undefined
+    const registry = new Promise<PriceAdapterView[]>((resolve) => {
+      publishAdapters = resolve
+    })
+    mockApi('get', async (url) => {
+      if (url !== '/api/upstream-price-sources/adapters') {
+        throw new Error(`Unexpected GET ${url}`)
+      }
+      return { data: { success: true, data: await registry } }
+    })
+
+    renderDrawer()
+    // The drawer is interactive while the registry is still in flight.
+    fireEvent.change(nameInput(), { target: { value: 'Gateway cost' } })
+    publishAdapters([VERCEL, MODELS_DEV])
+
+    await waitForAdapter(VERCEL.endpoint)
+    expect(nameInput()).toHaveValue('Gateway cost')
+    expect(screen.getByText(/Supplier cost/)).toBeInTheDocument()
+  })
+
+  test('clears an abandoned draft when the drawer is closed and opened again', async () => {
+    installAdapters([VERCEL, MODELS_DEV])
+
+    const drawer = renderDrawer()
+    await waitForAdapter(VERCEL.endpoint)
+    fireEvent.change(nameInput(), { target: { value: 'Abandoned draft' } })
+
+    drawer.setOpen(false)
+    drawer.setOpen(true)
+
+    await waitForAdapter(VERCEL.endpoint)
+    expect(nameInput()).toHaveValue('')
   })
 
   test('saves a curated reference source with its own role and scope and without a channel', async () => {

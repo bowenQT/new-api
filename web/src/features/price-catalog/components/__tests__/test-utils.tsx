@@ -50,7 +50,8 @@ export function mockApi(method: keyof MockableApi, impl: ApiMethod): void {
  * Renders a catalog panel under its own query client. Retries are off so a
  * failing request reaches the error state within the test rather than being
  * retried past it, and the client is returned for the tests that assert on
- * cache state.
+ * cache state. `rerender` keeps that same client, so a test can change a prop
+ * without the component remounting against a cold cache.
  */
 export function renderWithQueryClient(
   ui: ReactNode
@@ -59,11 +60,16 @@ export function renderWithQueryClient(
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   renderedClients.push(queryClient)
+  const rendered = render(
+    <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
+  )
   return {
     queryClient,
-    ...render(
-      <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
-    ),
+    ...rendered,
+    rerender: (next: ReactNode) =>
+      rendered.rerender(
+        <QueryClientProvider client={queryClient}>{next}</QueryClientProvider>
+      ),
   }
 }
 
