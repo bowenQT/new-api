@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 
 	"github.com/stretchr/testify/assert"
@@ -127,4 +128,49 @@ func TestEvaluateSourceAlertsCoverageDrop(t *testing.T) {
 
 	createAlertTestRun(t, db, source.Id, model.PriceSyncRunStatusPartial, 50, now)
 	assert.Contains(t, alertCodes(t, source, now), AlertCoverageDrop)
+}
+
+// TestEvaluateSourceAlertsCoverageDropOnRefusedRun covers the case the
+// two-successful-runs comparison structurally cannot see: the gate refused the
+// collapsed run, so it stayed failed and never became the baseline, leaving the
+// last two successful runs looking healthy. That is the run the admin most
+// needs told about, and only an explicit marker on the run distinguishes it
+// from a fetch failure.
+func TestEvaluateSourceAlertsCoverageDropOnRefusedRun(t *testing.T) {
+	db := setupCompareTestDB(t)
+	now := common.GetTimestamp()
+	source := createAlertTestSource(t, RoleCuratedReference, nil, "")
+	baseline := createAlertTestRun(t, db, source.Id, model.PriceSyncRunStatusSucceeded, 100, now)
+	source.LastSuccessRunId = &baseline.Id
+
+	// A fetch failure is a failed run too, but it is not a coverage refusal and
+	// must not be reported as one.
+	createAlertTestRun(t, db, source.Id, model.PriceSyncRunStatusFailed, 0, now)
+	assert.NotContains(t, alertCodes(t, source, now), AlertCoverageDrop)
+
+	refused := createAlertTestRun(t, db, source.Id, model.PriceSyncRunStatusFailed, 50, now)
+	gateRefused := true
+	require.NoError(t, db.Model(&model.PriceSyncRun{}).Where("id = ?", refused.Id).
+		Update("coverage_drop_exceeded", &gateRefused).Error)
+
+	alerts, err := EvaluateSourceAlerts([]*model.PriceSource{source}, now)
+	require.NoError(t, err)
+	var coverage *dto.UpstreamPriceAlert
+	for i := range alerts {
+		if alerts[i].Code == AlertCoverageDrop {
+			coverage = &alerts[i]
+		}
+	}
+	require.NotNil(t, coverage, "a gate-refused coverage collapse must raise an alert")
+	require.NotNil(t, coverage.Params)
+	require.NotNil(t, coverage.Params.RunId)
+	assert.Equal(t, refused.Id, *coverage.Params.RunId)
+	require.NotNil(t, coverage.Params.PreviousValidCount)
+	assert.Equal(t, 100, *coverage.Params.PreviousValidCount)
+	require.NotNil(t, coverage.Params.ValidCount)
+	assert.Equal(t, 50, *coverage.Params.ValidCount)
+	require.NotNil(t, coverage.Params.DropThreshold)
+	assert.Equal(t, DefaultCoverageDropThreshold, *coverage.Params.DropThreshold)
+	require.NotNil(t, coverage.Params.GateRefused)
+	assert.True(t, *coverage.Params.GateRefused)
 }

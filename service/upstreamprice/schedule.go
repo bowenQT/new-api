@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 )
@@ -135,8 +134,14 @@ func RunScheduledSync(ctx context.Context, progress func(processed, total int)) 
 		// (spec §7.1); the scheduled path refuses them before fetching.
 		orphaned, err := IsPriceSourceOrphaned(source)
 		if err != nil {
-			summary.Skipped++
-			common.SysError(fmt.Sprintf("upstream price scheduled sync orphan check failed for source %d: %v", source.Id, err))
+			// A failed lookup is not "the channel is confirmed gone": the source
+			// was neither run nor safely skipped. Counting it as a skip would
+			// finish the task successfully and leave no backoff timestamp, so
+			// the same broken source would be retried on every wake and the
+			// failure would never surface (spec §8.4).
+			summary.Failed++
+			logger.LogWarn(ctx, fmt.Sprintf("upstream price scheduled sync orphan check failed for source %d (%q): %v", source.Id, source.Name, err))
+			_ = recordScheduledAttemptFailure(ctx, source, fmt.Errorf("orphan check failed: %w", err))
 			continue
 		}
 		if orphaned {
@@ -167,41 +172,16 @@ func RunScheduledSync(ctx context.Context, progress func(processed, total int)) 
 			logger.LogInfo(ctx, fmt.Sprintf("upstream price scheduled sync committed run %d for source %d (%q): status=%s valid=%d new=%d",
 				result.RunId, source.Id, source.Name, result.Status, result.ValidCount, result.NewSnapshotCount))
 		}
-		// Re-read the source so alerts see the state this run just wrote.
-		if refreshed, refreshErr := model.GetPriceSourceById(source.Id); refreshErr == nil {
-			LogSourceAlertsAfterSync(ctx, refreshed)
-		} else {
-			common.SysError(fmt.Sprintf("upstream price alert reload failed for source %d: %v", source.Id, refreshErr))
-		}
+		// Alerts, including cost inversion, are logged by the shared post-write
+		// path inside the sync itself, so the manual flow gets them too.
 		if progress != nil {
 			progress(index+1, summary.Due)
 		}
 	}
 
-	if summary.Executed > 0 {
-		logCostInversionAlerts(ctx)
-	}
 	if summary.Failed > 0 || summary.TimedOut {
 		return summary, fmt.Errorf("upstream price scheduled sync incomplete: %d of %d due sources failed, %d skipped, timed_out=%t",
 			summary.Failed, summary.Due, summary.Skipped, summary.TimedOut)
 	}
 	return summary, nil
-}
-
-// logCostInversionAlerts runs one default-group comparison over the catalog
-// and logs the models whose worst cost exceeds the projected sale price
-// (spec §13). It is bounded to one pass per scheduled execution.
-func logCostInversionAlerts(ctx context.Context) {
-	comparison, err := CompareUpstreamPrices(&dto.UpstreamPriceCompareRequest{})
-	if err != nil {
-		common.SysError(fmt.Sprintf("upstream price cost inversion check failed: %v", err))
-		return
-	}
-	inversions := make([]dto.UpstreamPriceAlert, 0)
-	for _, alert := range comparison.Alerts {
-		if alert.Code == AlertCostInversion {
-			inversions = append(inversions, alert)
-		}
-	}
-	LogPriceCatalogAlerts(ctx, inversions)
 }

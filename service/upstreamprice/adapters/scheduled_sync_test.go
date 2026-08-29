@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -102,18 +103,20 @@ func TestScheduledSyncCommitsWithoutPreviewToken(t *testing.T) {
 // reasons are covered: zero valid observations and the coverage drop gate.
 func TestScheduledSyncReportsRefusedRunAsFailure(t *testing.T) {
 	cases := []struct {
-		name     string
-		baseline string
-		refused  string
+		name             string
+		baseline         string
+		refused          string
+		wantCoverageGate bool
 	}{
 		{
 			name:    "zero valid observations",
 			refused: `{"object":"list","data":[{"id":"vendor/unpriced","owned_by":"vendor","pricing":{}}]}`,
 		},
 		{
-			name:     "coverage drop gate",
-			baseline: pricedCatalogPayload(5),
-			refused:  pricedCatalogPayload(1),
+			name:             "coverage drop gate",
+			baseline:         pricedCatalogPayload(5),
+			refused:          pricedCatalogPayload(1),
+			wantCoverageGate: true,
 		},
 	}
 
@@ -154,14 +157,112 @@ func TestScheduledSyncReportsRefusedRunAsFailure(t *testing.T) {
 			require.Len(t, runs, 1)
 			assert.Equal(t, model.PriceSyncRunStatusFailed, runs[0].Status)
 			assert.NotEqual(t, &runs[0].Id, refused.LastSuccessRunId)
+
+			// The refusal reason is recorded explicitly, so alerting can tell a
+			// coverage collapse apart from any other failed run without reading
+			// the error summary text.
+			require.NotNil(t, runs[0].CoverageDropExceeded)
+			assert.Equal(t, testCase.wantCoverageGate, *runs[0].CoverageDropExceeded)
 		})
 	}
+}
+
+// TestScheduledSyncFailsOnOrphanCheckError separates the two outcomes of the
+// orphan preflight: a channel confirmed gone is a skip, but a database error is
+// not an answer at all. Counting it as a skip finished the whole pass
+// successfully and left no backoff timestamp, so the broken source was retried
+// on every wake and the failure never surfaced.
+func TestScheduledSyncFailsOnOrphanCheckError(t *testing.T) {
+	payload := pricedCatalogPayload(3)
+	db, source := setupScheduledFixture(t, &payload)
+	require.NoError(t, db.Migrator().DropTable(&model.Channel{}))
+
+	summary, err := upstreamprice.RunScheduledSync(context.Background(), nil)
+	require.Error(t, err)
+	assert.Equal(t, 1, summary.Due)
+	assert.Equal(t, 1, summary.Failed)
+	assert.Equal(t, 0, summary.Skipped)
+	assert.Equal(t, 0, summary.Executed)
+
+	failed, err := model.GetPriceSourceById(source.Id)
+	require.NoError(t, err)
+	require.NotNil(t, failed.LastErrorAt)
+	assert.Contains(t, failed.LastErrorSummary, "orphan check failed")
+
+	runs, err := model.GetRecentPriceSyncRuns(source.Id, 1)
+	require.NoError(t, err)
+	require.Len(t, runs, 1)
+	assert.Equal(t, model.PriceSyncRunStatusFailed, runs[0].Status)
+
+	// Backed off like any other failed attempt.
+	second, err := upstreamprice.RunScheduledSync(context.Background(), nil)
+	require.NoError(t, err)
+	assert.Equal(t, 0, second.Due)
+}
+
+// TestScheduledSyncDoesNotBackOffOnConfigConflict pins the one scheduled
+// failure that must leave no trace on the source: an admin edited the source
+// while the fetch was in flight, so the CAS refused a commit computed under the
+// superseded configuration. Backing off here would delay the new
+// configuration's first real sync by a full interval, and recording a failure
+// would blame it for a conflict it did not cause.
+func TestScheduledSyncDoesNotBackOffOnConfigConflict(t *testing.T) {
+	db := setupCatalogTestDB(t)
+	payload := pricedCatalogPayload(3)
+	editedSourceId := int64(0)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The admin's edit lands while this fetch is still running.
+		if id := atomic.LoadInt64(&editedSourceId); id > 0 {
+			require.NoError(t, db.Model(&model.PriceSource{}).Where("id = ?", id).
+				Update("config_revision", gorm.Expr("config_revision + 1")).Error)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(payload))
+	}))
+	t.Cleanup(server.Close)
+
+	adapterKey := nextTestAdapterKey()
+	require.NoError(t, upstreamprice.RegisterAdapter(newVercelAdapterForTest(adapterKey, server.URL)))
+	channel := createTestChannel(t, db)
+	source, err := upstreamprice.CreatePriceSource(&dto.UpstreamPriceSourceRequest{
+		Name:       "conflicting-cost",
+		AdapterKey: adapterKey,
+		Role:       string(upstreamprice.RoleSupplierCost),
+		Scope:      string(upstreamprice.ScopePublic),
+		ChannelId:  &channel.Id,
+	})
+	require.NoError(t, err)
+	enableScheduleForSource(t, db, source.Id)
+	atomic.StoreInt64(&editedSourceId, int64(source.Id))
+
+	summary, err := upstreamprice.RunScheduledSync(context.Background(), nil)
+	require.Error(t, err)
+	assert.Equal(t, 1, summary.Executed)
+	assert.Equal(t, 1, summary.Failed)
+
+	conflicted, err := model.GetPriceSourceById(source.Id)
+	require.NoError(t, err)
+	assert.Nil(t, conflicted.LastErrorAt, "a superseded configuration must not back off the new one")
+	assert.Empty(t, conflicted.LastErrorSummary)
+	assert.Nil(t, conflicted.LastSuccessRunId)
+
+	runs, err := model.GetRecentPriceSyncRuns(source.Id, 1)
+	require.NoError(t, err)
+	assert.Empty(t, runs, "a CAS conflict must not count toward consecutive failures")
+
+	// The source stays due, so the next wake retries under the new configuration.
+	atomic.StoreInt64(&editedSourceId, 0)
+	second, err := upstreamprice.RunScheduledSync(context.Background(), nil)
+	require.NoError(t, err)
+	assert.Equal(t, 1, second.Due)
+	assert.Equal(t, 1, second.Succeeded)
 }
 
 // TestScheduledSyncBacksOffAfterPreflightFailure is the §8.4 backoff contract:
 // a failure that never reaches the adapter — here a disabled supplier channel —
 // still stamps last_error_at, so the source waits a full interval instead of
-// retrying on every 15-minute wake.
+// retrying on every 15-minute wake, and records a run so the attempt is visible
+// to the consecutive-failure alert.
 func TestScheduledSyncBacksOffAfterPreflightFailure(t *testing.T) {
 	payload := pricedCatalogPayload(3)
 	db, source := setupScheduledFixture(t, &payload)
@@ -181,10 +282,16 @@ func TestScheduledSyncBacksOffAfterPreflightFailure(t *testing.T) {
 	assert.Contains(t, failed.LastErrorSummary, "channel is disabled")
 	assert.Nil(t, failed.LastSuccessRunId)
 
-	// No run was recorded, but the attempt still backs the source off.
+	// The attempt is recorded as a failed run carrying no items, so it both
+	// backs the source off and counts toward the consecutive-failure alert.
 	runs, err := model.GetRecentPriceSyncRuns(source.Id, 1)
 	require.NoError(t, err)
-	assert.Empty(t, runs)
+	require.Len(t, runs, 1)
+	assert.Equal(t, model.PriceSyncRunStatusFailed, runs[0].Status)
+	assert.Contains(t, runs[0].ErrorSummary, "channel is disabled")
+	items, err := model.GetPriceSyncRunItems(runs[0].Id)
+	require.NoError(t, err)
+	assert.Empty(t, items)
 
 	second, err := upstreamprice.RunScheduledSync(context.Background(), nil)
 	require.NoError(t, err)

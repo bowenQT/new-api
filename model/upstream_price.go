@@ -120,6 +120,14 @@ type PriceSyncRun struct {
 	NewSnapshotCount     int    `json:"new_snapshot_count"`
 	IdempotentHitCount   int    `json:"idempotent_hit_count"`
 	ErrorSummary         string `json:"error_summary" gorm:"type:varchar(255)"`
+	// CoverageDropExceeded records whether the coverage gate refused this run,
+	// as an explicit marker rather than something alerting has to infer from
+	// ErrorSummary text or from counts. It is a pointer so the column stays
+	// nullable on every supported database: rows written before the column
+	// existed read back as nil ("not known to be a gate refusal") instead of
+	// failing to scan, and no boolean default is declared, so AutoMigrate
+	// cannot churn on MySQL/PostgreSQL default normalization.
+	CoverageDropExceeded *bool `json:"coverage_drop_exceeded,omitempty"`
 }
 
 // PriceSyncRunItem is the per-model detail of one run (spec §7.3). The
