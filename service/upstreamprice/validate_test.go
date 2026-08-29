@@ -4,6 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/model"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -247,6 +250,62 @@ func TestCanonicalSettingsSizeRecheckedAfterEscaping(t *testing.T) {
 	canonical, err := CanonicalSourceSettingsJSON(okRaw)
 	require.NoError(t, err)
 	assert.NotEmpty(t, canonical)
+}
+
+// TestValidatePriceSourceRoleChannelRules pins the single authority for the
+// role×channel combination (spec §7.1). The adapter under test admits both
+// roles and accepts any source of its own key, so the verdict can only come
+// from the role: supplier_cost requires an enabled channel, every other role
+// refuses one. This is the rule the admin UI mirrors, and the reason no
+// adapter flag reports a channel requirement.
+func TestValidatePriceSourceRoleChannelRules(t *testing.T) {
+	db := setupCompareTestDB(t)
+
+	adapterKey := "validate_role_channel_test"
+	require.NoError(t, RegisterAdapter(&fakeAdapter{
+		key:    adapterKey,
+		roles:  []PriceRole{RoleSupplierCost, RoleCuratedReference},
+		scopes: []PriceScope{ScopePublic},
+	}))
+
+	enabled := &model.Channel{Name: "enabled", Key: "k-enabled", Status: common.ChannelStatusEnabled}
+	require.NoError(t, db.Create(enabled).Error)
+	disabled := &model.Channel{Name: "disabled", Key: "k-disabled", Status: common.ChannelStatusManuallyDisabled}
+	require.NoError(t, db.Create(disabled).Error)
+	missingChannelId := enabled.Id + disabled.Id + 1000
+
+	tests := []struct {
+		name      string
+		role      PriceRole
+		channelId *int
+		wantErr   string
+	}{
+		{name: "supplier cost with an enabled channel is accepted", role: RoleSupplierCost, channelId: &enabled.Id},
+		{name: "supplier cost without a channel is refused", role: RoleSupplierCost, wantErr: "must reference a channel"},
+		{name: "supplier cost with a disabled channel is refused", role: RoleSupplierCost, channelId: &disabled.Id, wantErr: "is not enabled"},
+		{name: "supplier cost with an unknown channel is refused", role: RoleSupplierCost, channelId: &missingChannelId, wantErr: "does not exist"},
+		{name: "curated reference without a channel is accepted", role: RoleCuratedReference},
+		{name: "curated reference with a channel is refused", role: RoleCuratedReference, channelId: &enabled.Id, wantErr: "must not reference a channel"},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			source := &model.PriceSource{
+				Name:       "role channel fixture",
+				AdapterKey: adapterKey,
+				Role:       string(testCase.role),
+				Scope:      string(ScopePublic),
+				ChannelId:  testCase.channelId,
+			}
+			err := ValidatePriceSourceForWrite(source)
+			if testCase.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), testCase.wantErr)
+		})
+	}
 }
 
 func TestTruncateUTF8(t *testing.T) {

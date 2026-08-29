@@ -43,12 +43,15 @@ export type PriceScope =
   | 'unknown'
   | (string & {})
 
-/** `dto.UpstreamPriceAdapterView` */
+/**
+ * `dto.UpstreamPriceAdapterView`. `endpoint` is the adapter's pinned public
+ * catalog URL, empty for an adapter without a fixed one. Whether a source needs
+ * a channel is not reported here: it follows from the selected role alone.
+ */
 export interface PriceAdapterView {
   key: string
   allowed_roles: PriceRole[]
   allowed_scopes: PriceScope[]
-  requires_channel: boolean
   endpoint: string
 }
 

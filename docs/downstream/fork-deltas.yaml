@@ -399,7 +399,7 @@ entries:
       - generated TanStack route tree in web/src/routeTree.gen.ts
       - shared frontend i18n locale files and the i18n:sync report
       - RootAuth API groups /api/upstream-price-sources and /api/upstream-prices
-      - the adapter registry catalog, served by GET /api/upstream-price-sources/adapters; the UI now reads that endpoint for every adapter role, scope, channel requirement and endpoint, and web/src/features/price-catalog/constants.ts keeps only the untranslated adapter display names
+      - the adapter registry catalog, served by GET /api/upstream-price-sources/adapters; the UI now reads that endpoint for every adapter role, scope and endpoint (channel requirement is derived from the role alone), and web/src/features/price-catalog/constants.ts keeps only the untranslated adapter display names
     conflict_risk: medium
     verification:
       - cd web && bun run typecheck

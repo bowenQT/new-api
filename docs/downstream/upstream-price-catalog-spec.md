@@ -196,8 +196,26 @@ type Adapter interface {
     Key() string
     Supports(source SourceConfig) bool
     Fetch(ctx context.Context, source SourceConfig) ([]Observation, FetchMeta, error)
+    AllowedRoles() []PriceRole
+    AllowedScopes() []PriceScope
 }
 ```
+
+`Supports` 只回答适配器身份问题（这个来源是否由本适配器服务）。role 与渠道的组合规则不在适配器里重复判定，
+唯一权威是 `ValidatePriceSourceForWrite`（§7.1）：`supplier_cost` 必须引用一个 enabled 渠道，其余 role 一律禁止渠道。
+适配器不得声明自己的渠道要求，否则同一规则会出现第二个可漂移的判定源。
+
+**可选能力接口。** 适配器的附加能力用独立的小接口表达，`Adapter` 主接口不做强制：
+
+```go
+// 固定公开 URL 的适配器实现；没有固定 URL 的适配器不实现该接口，
+// 而不是实现后返回空串。
+type EndpointReporter interface {
+    Endpoint() string
+}
+```
+
+`ListAdapters` 用类型断言取值，未实现者的 `endpoint` 为空串。后续新增的可选能力（例如条件请求）沿用同一写法。
 
 `Observation` 是供应商无关的中间对象：
 
@@ -580,7 +598,7 @@ PUT    /api/upstream-price-sources/:id
 
 五个接口均为 RootAuth。首版不提供硬删除；使用 `enabled=false`。
 
-`GET /api/upstream-price-sources/adapters` 返回注册表中每个 adapter 的 `key`、`allowed_roles`、`allowed_scopes`、`requires_channel` 与固定公开 `endpoint`，供管理界面按注册表构建来源表单，避免前端复制一份 adapter 清单后与后端漂移。该响应只含非敏感信息，绝不包含凭证（§12）。
+`GET /api/upstream-price-sources/adapters` 返回注册表中每个 adapter 的 `key`、`allowed_roles`、`allowed_scopes` 与固定公开 `endpoint`（未实现 `EndpointReporter` 的适配器为空串），按 `key` 升序，供管理界面按注册表构建来源表单，避免前端复制一份 adapter 清单后与后端漂移。响应不含渠道要求字段：是否需要渠道只由所选 role 推导（§6.1、§7.1），前端表单据此判定。该响应只含非敏感信息，绝不包含凭证（§12）。
 
 `GET /api/upstream-price-sources/alerts` 返回 `{generated_at, alerts}`：`alerts` 是 §13 前四类来源级告警的扁平列表，与 `GET /api/upstream-prices/current` 的 `alerts` 字段出自同一次 `EvaluateSourceAlerts` 评估，逐项相同。它不含成本倒挂（`cost_inversion`）——倒挂是 canonical 模型维度的判定，不挂在来源上，由 compare 承载（§13）。来源列表页用它渲染告警，因而无需为告警拉取整份目录投影。
 

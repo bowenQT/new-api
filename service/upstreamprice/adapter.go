@@ -202,14 +202,24 @@ type FetchMeta struct {
 // rejected, never silently overridden.
 type Adapter interface {
 	Key() string
+	// Supports answers adapter-identity questions only: whether this adapter
+	// is the one serving the source. Whether a role may carry a channel is
+	// decided exclusively by ValidatePriceSourceForWrite, so the rule has a
+	// single authority and an adapter cannot pre-empt it with a different
+	// verdict.
 	Supports(source SourceConfig) bool
 	Fetch(ctx context.Context, source SourceConfig) ([]Observation, FetchMeta, error)
 	AllowedRoles() []PriceRole
 	AllowedScopes() []PriceScope
-	// Endpoint reports the pinned public catalog URL this adapter fetches
-	// from. It is provenance shown to admins, never a configurable value, and
-	// must never carry credentials or query parameters derived from a source
-	// (spec §12). Adapters without a fixed URL return an empty string.
+}
+
+// EndpointReporter is the optional capability of adapters that fetch from a
+// pinned public URL. Endpoint is provenance shown to admins, never a
+// configurable value, and must never carry credentials or query parameters
+// derived from a source (spec §12). An adapter without a fixed URL — a
+// database-backed or manually fed one, say — simply does not implement this
+// interface; it does not implement it and return an empty string.
+type EndpointReporter interface {
 	Endpoint() string
 }
 

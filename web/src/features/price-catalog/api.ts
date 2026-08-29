@@ -45,8 +45,8 @@ export async function listPriceSources(): Promise<
 }
 
 /**
- * The registered adapters with the role, scope, channel and endpoint contract
- * each one admits (spec §12). The source form is built from this response, so
+ * The registered adapters with the role, scope and endpoint contract each one
+ * admits (spec §12); the channel requirement is derived from the role alone. The source form is built from this response, so
  * the client never proposes a combination the server would refuse.
  */
 export async function listPriceAdapters(): Promise<
