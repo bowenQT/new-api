@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/QuantumNous/new-api/common"
 
@@ -272,19 +273,72 @@ func GetPriceSnapshotsByIds(ids []int) ([]*PriceSnapshot, error) {
 	return snapshots, err
 }
 
-// GetLatestPriceSnapshotForModel returns the most recently observed snapshot
-// of one source model, ordered by run id (the ordering authority), regardless
-// of whether it is still current. Used to display prices for missing models.
-func GetLatestPriceSnapshotForModel(sourceId int, sourceModelName string) (*PriceSnapshot, error) {
-	snapshot := &PriceSnapshot{}
-	err := DB.Where("source_id = ? AND source_model_name = ?", sourceId, sourceModelName).
-		Order("last_seen_run_id desc").
-		First(snapshot).Error
-	if err != nil {
-		return nil, err
+// priceSnapshotLookupBatchSize bounds how many models one lookup query covers,
+// so a run with thousands of missing models issues a few bounded queries
+// instead of one unbounded condition list.
+const priceSnapshotLookupBatchSize = 200
+
+// GetLatestPriceSnapshotsForModels returns the most recently observed snapshot
+// of each named source model, regardless of whether it is still current. It is
+// what the catalog shows for models a source stopped returning.
+//
+// Selection follows run id, the ordering authority (spec §7.3): the highest
+// last_seen_run_id wins, and the lowest snapshot id breaks a tie between rows
+// that share it. Models with no snapshot at all are absent from the result.
+//
+// Each batch of models is resolved by one statement that asks for the rows no
+// better row exists for, rather than by a GROUP BY of every model's highest run
+// id followed by a lookup of those exact (model, run id) pairs. Two statements
+// leave a window a concurrent sync can fall into: upsertPriceSnapshot advances
+// last_seen_run_id on a fingerprint-idempotent hit, so a commit landing between
+// the two makes the second statement look for a run id the row no longer
+// carries, and the model silently disappears from the catalog — losing both its
+// name and its last observed price. One statement always observes a row either
+// before or after that write. The predicate is plain correlated NOT EXISTS with
+// no reserved-word column and no dialect-specific function, so it runs
+// unchanged on SQLite, MySQL, and PostgreSQL, and it reads the same
+// (source_id, source_model_name) index prefix the identity unique key provides.
+func GetLatestPriceSnapshotsForModels(sourceId int, sourceModelNames []string) (map[string]*PriceSnapshot, error) {
+	names := make([]string, 0, len(sourceModelNames))
+	seen := make(map[string]bool, len(sourceModelNames))
+	for _, name := range sourceModelNames {
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		names = append(names, name)
 	}
-	return snapshot, nil
+	if len(names) == 0 {
+		return nil, nil
+	}
+
+	latest := make(map[string]*PriceSnapshot, len(names))
+	for batch := range slices.Chunk(names, priceSnapshotLookupBatchSize) {
+		var snapshots []*PriceSnapshot
+		if err := DB.Where("source_id = ? AND source_model_name IN ?", sourceId, batch).
+			Where(latestPriceSnapshotPredicate).
+			Find(&snapshots).Error; err != nil {
+			return nil, err
+		}
+		for _, snapshot := range snapshots {
+			latest[snapshot.SourceModelName] = snapshot
+		}
+	}
+	return latest, nil
 }
+
+// latestPriceSnapshotPredicate keeps only the winning observation of each
+// (source_id, source_model_name): the row for which no row of the same identity
+// has a higher last_seen_run_id, or the same run id and a lower snapshot id.
+// Exactly one row of each model satisfies it, so the caller needs no ordering
+// and no per-model deduplication.
+const latestPriceSnapshotPredicate = `NOT EXISTS (
+	SELECT 1 FROM price_snapshots better
+	WHERE better.source_id = price_snapshots.source_id
+	  AND better.source_model_name = price_snapshots.source_model_name
+	  AND (better.last_seen_run_id > price_snapshots.last_seen_run_id
+	       OR (better.last_seen_run_id = price_snapshots.last_seen_run_id
+	           AND better.id < price_snapshots.id)))`
 
 // PriceSyncCommitItem is one prepared run item. Snapshot is only set for
 // status=valid items on runs that will persist snapshots.
@@ -304,25 +358,21 @@ type PriceSyncCommit struct {
 	Items                  []PriceSyncCommitItem
 }
 
-func intPtrEqual(a, b *int) bool {
+// IntPtrEqual compares two optional ints, treating "both absent" as equal. The
+// price sync CAS checks compare optional base run ids with it, at commit time
+// and again when a preview token is redeemed, so both sides must answer the
+// absent case identically.
+func IntPtrEqual(a, b *int) bool {
 	if a == nil || b == nil {
 		return a == nil && b == nil
 	}
 	return *a == *b
 }
 
-// truncateSummary caps an error summary at 255 bytes without splitting a
-// UTF-8 sequence.
+// truncateSummary caps an error summary at the width of its column.
 func truncateSummary(s string) string {
 	const maxSummaryBytes = 255
-	if len(s) <= maxSummaryBytes {
-		return s
-	}
-	cut := maxSummaryBytes
-	for cut > 0 && s[cut]&0xC0 == 0x80 {
-		cut--
-	}
-	return s[:cut]
+	return common.TruncateUTF8(s, maxSummaryBytes)
 }
 
 // CommitPriceSync writes one sync run, its items, and (for non-failed runs)
@@ -347,7 +397,7 @@ func CommitPriceSync(commit *PriceSyncCommit) (*PriceSyncRun, error) {
 		if source.ConfigRevision != commit.ExpectedConfigRevision {
 			return ErrPriceSyncConflict
 		}
-		if !intPtrEqual(source.LastSuccessRunId, commit.ExpectedBaseRunId) {
+		if !IntPtrEqual(source.LastSuccessRunId, commit.ExpectedBaseRunId) {
 			return ErrPriceSyncConflict
 		}
 		// Authoritative orphan/disabled-channel check inside the locked
@@ -429,17 +479,14 @@ func CommitPriceSync(commit *PriceSyncCommit) (*PriceSyncRun, error) {
 			return err
 		}
 
-		sourceUpdates := map[string]interface{}{
-			"updated_time": now,
+		if !persistSnapshots {
+			return stampPriceSourceFailure(tx, commit.SourceId, run.ErrorSummary, now)
 		}
-		if persistSnapshots {
-			sourceUpdates["last_success_run_id"] = run.Id
-			sourceUpdates["last_success_at"] = now
-		} else {
-			sourceUpdates["last_error_at"] = now
-			sourceUpdates["last_error_summary"] = truncateSummary(run.ErrorSummary)
-		}
-		return tx.Model(&PriceSource{}).Where("id = ?", commit.SourceId).Updates(sourceUpdates).Error
+		return tx.Model(&PriceSource{}).Where("id = ?", commit.SourceId).Updates(map[string]interface{}{
+			"last_success_run_id": run.Id,
+			"last_success_at":     now,
+			"updated_time":        now,
+		}).Error
 	})
 	if err != nil {
 		return nil, err
@@ -453,8 +500,16 @@ func CommitPriceSync(commit *PriceSyncCommit) (*PriceSyncRun, error) {
 // due check reads last_error_at, so an attempt that leaves no run must still
 // leave a timestamp or the source retries on every wake (spec §8.4).
 func RecordPriceSourceFailure(sourceId int, errorSummary string) error {
-	now := common.GetTimestamp()
-	return DB.Model(&PriceSource{}).Where("id = ?", sourceId).Updates(map[string]interface{}{
+	return stampPriceSourceFailure(DB, sourceId, errorSummary, common.GetTimestamp())
+}
+
+// stampPriceSourceFailure records a failed sync attempt on the source row: the
+// failure time, its bounded summary, and the row's update time. It runs on the
+// caller's handle, so a failed commit stamps the source inside the very
+// transaction that wrote its failed run and both roll back together (spec
+// §8.4).
+func stampPriceSourceFailure(tx *gorm.DB, sourceId int, errorSummary string, now int64) error {
+	return tx.Model(&PriceSource{}).Where("id = ?", sourceId).Updates(map[string]interface{}{
 		"last_error_at":      now,
 		"last_error_summary": truncateSummary(errorSummary),
 		"updated_time":       now,
@@ -519,11 +574,7 @@ func RecordFailedPriceSyncRun(sourceId int, run PriceSyncRun) (*PriceSyncRun, er
 		if err := tx.Create(&run).Error; err != nil {
 			return err
 		}
-		return tx.Model(&PriceSource{}).Where("id = ?", sourceId).Updates(map[string]interface{}{
-			"last_error_at":      now,
-			"last_error_summary": truncateSummary(run.ErrorSummary),
-			"updated_time":       now,
-		}).Error
+		return stampPriceSourceFailure(tx, sourceId, run.ErrorSummary, now)
 	})
 	if err != nil {
 		return nil, err

@@ -16,39 +16,29 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { createSectionRegistry } from '@/features/system-settings/utils/section-registry'
-
 /**
  * Price catalog sections. The former single "upstream price sync" entry is
  * split into the two explicit surfaces required by spec §11: managing
  * observation sources, and comparing catalog prices against sale prices.
+ *
+ * Each section is a route segment of `/price-catalog/$section` whose content is
+ * rendered directly by the page component, so the sections are only their ids,
+ * their default and their titles.
  */
-const PRICE_CATALOG_SECTIONS = [
-  {
-    id: 'sources',
-    titleKey: 'Price Sources',
-    build: () => null, // Content is rendered directly in the page component
-  },
-  {
-    id: 'compare',
-    titleKey: 'Price Comparison',
-    build: () => null, // Content is rendered directly in the page component
-  },
-] as const
+export const PRICE_CATALOG_SECTION_IDS = ['sources', 'compare'] as const
 
-export type PriceCatalogSectionId =
-  (typeof PRICE_CATALOG_SECTIONS)[number]['id']
+export type PriceCatalogSectionId = (typeof PRICE_CATALOG_SECTION_IDS)[number]
 
-const priceCatalogRegistry = createSectionRegistry<
+export const PRICE_CATALOG_DEFAULT_SECTION: PriceCatalogSectionId = 'sources'
+
+/**
+ * i18n source keys of the section titles. The page header, the page tabs and
+ * the admin sidebar all name the same two surfaces, so they read them here.
+ */
+export const PRICE_CATALOG_SECTION_TITLE_KEYS: Record<
   PriceCatalogSectionId,
-  Record<string, never>,
-  []
->({
-  sections: PRICE_CATALOG_SECTIONS,
-  defaultSection: 'sources',
-  basePath: '/price-catalog',
-  urlStyle: 'path',
-})
-
-export const PRICE_CATALOG_SECTION_IDS = priceCatalogRegistry.sectionIds
-export const PRICE_CATALOG_DEFAULT_SECTION = priceCatalogRegistry.defaultSection
+  string
+> = {
+  sources: 'Price Sources',
+  compare: 'Price Comparison',
+}

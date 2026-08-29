@@ -37,7 +37,7 @@ import {
   PROJECTION_LABEL_KEYS,
   SALE_BILLING_MODE_LABEL_KEYS,
 } from '../constants'
-import { formatMarginRate, formatUsdAmount } from '../lib/compare-format'
+import { formatPercentRate, formatUsdAmount } from '../lib/compare-format'
 import type { PriceCompareEntry, PriceCompareSourcePrice } from '../types'
 import {
   CatalogFlagBadges,
@@ -264,7 +264,7 @@ export function PriceCompareTable(props: Props) {
                       {formatUsdAmount(entry.worst_margin_usd)}
                     </div>
                     <div className='text-muted-foreground'>
-                      {formatMarginRate(entry.worst_margin_rate)}
+                      {formatPercentRate(entry.worst_margin_rate)}
                     </div>
                   </TableCell>
                 </TableRow>

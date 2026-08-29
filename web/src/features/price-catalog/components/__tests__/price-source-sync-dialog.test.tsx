@@ -16,11 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, test } from 'vitest'
-
-import { api } from '@/lib/api'
 
 import type {
   PricePreviewResponse,
@@ -28,13 +25,11 @@ import type {
   PriceSyncResponse,
 } from '../../types'
 import { PriceSourceSyncDialog } from '../price-source-sync-dialog'
-
-type ApiMethod = (url: string, data?: unknown) => Promise<{ data: unknown }>
-type MockableApi = { post: ApiMethod }
-
-const apiClient = api as unknown as MockableApi
-const originalPost = apiClient.post
-let queryClient: QueryClient | null = null
+import {
+  mockApi,
+  renderWithQueryClient,
+  resetCatalogTestEnv,
+} from './test-utils'
 
 const source: PriceSourceView = {
   id: 42,
@@ -106,18 +101,13 @@ function renderDialog(
   onSynced: () => void = () => undefined,
   sourceOverrides: Partial<PriceSourceView> = {}
 ) {
-  queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  })
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <PriceSourceSyncDialog
-        open
-        onOpenChange={() => undefined}
-        source={{ ...source, ...sourceOverrides }}
-        onSynced={onSynced}
-      />
-    </QueryClientProvider>
+  return renderWithQueryClient(
+    <PriceSourceSyncDialog
+      open
+      onOpenChange={() => undefined}
+      source={{ ...source, ...sourceOverrides }}
+      onSynced={onSynced}
+    />
   )
 }
 
@@ -133,17 +123,13 @@ async function commitPreviewedSync() {
   await screen.findByText('Run #9')
 }
 
-afterEach(() => {
-  apiClient.post = originalPost
-  queryClient?.clear()
-  queryClient = null
-})
+afterEach(resetCatalogTestEnv)
 
 describe('price source sync dialog', () => {
   test('offers no commit before a preview has been run', () => {
-    apiClient.post = async () => {
+    mockApi('post', async () => {
       throw new Error('no request expected')
-    }
+    })
 
     renderDialog()
 
@@ -157,7 +143,7 @@ describe('price source sync dialog', () => {
 
   test('commits with the token the preview returned and then requires a fresh preview', async () => {
     const calls: { url: string; data: unknown }[] = []
-    apiClient.post = async (url, data) => {
+    mockApi('post', async (url, data) => {
       calls.push({ url, data })
       if (url.endsWith('/preview')) {
         return { data: { success: true, data: preview } }
@@ -178,7 +164,7 @@ describe('price source sync dialog', () => {
           },
         },
       }
-    }
+    })
     let syncedCount = 0
 
     renderDialog(() => {
@@ -212,7 +198,7 @@ describe('price source sync dialog', () => {
   })
 
   test('labels a previewed model whose price varies across providers', async () => {
-    apiClient.post = async () => ({ data: { success: true, data: preview } })
+    mockApi('post', async () => ({ data: { success: true, data: preview } }))
 
     renderDialog()
     fireEvent.click(screen.getByRole('button', { name: 'Run preview' }))
@@ -225,7 +211,7 @@ describe('price source sync dialog', () => {
   })
 
   test('warns about a previewed model priced along dimensions the catalog does not normalize', async () => {
-    apiClient.post = async () => ({
+    mockApi('post', async () => ({
       data: {
         success: true,
         data: {
@@ -241,7 +227,7 @@ describe('price source sync dialog', () => {
           ],
         },
       },
-    })
+    }))
 
     renderDialog()
     fireEvent.click(screen.getByRole('button', { name: 'Run preview' }))
@@ -254,7 +240,7 @@ describe('price source sync dialog', () => {
   })
 
   test('shows the empty preview message when the fetch discovered no model', async () => {
-    apiClient.post = async () => ({
+    mockApi('post', async () => ({
       data: {
         success: true,
         data: {
@@ -266,7 +252,7 @@ describe('price source sync dialog', () => {
           items: [],
         },
       },
-    })
+    }))
 
     renderDialog()
     fireEvent.click(screen.getByRole('button', { name: 'Run preview' }))
@@ -279,7 +265,7 @@ describe('price source sync dialog', () => {
   // A refused or partial commit still comes back inside a success envelope, so
   // the dialog has to read the run status rather than the envelope.
   test('reports a gate-refused commit as a failure that wrote nothing', async () => {
-    apiClient.post = async (url) => {
+    mockApi('post', async (url) => {
       if (url.endsWith('/preview')) {
         return { data: { success: true, data: preview } }
       }
@@ -296,7 +282,7 @@ describe('price source sync dialog', () => {
           },
         },
       }
-    }
+    })
 
     renderDialog()
     await commitPreviewedSync()
@@ -318,7 +304,7 @@ describe('price source sync dialog', () => {
   })
 
   test('reports a commit with no valid observation as a failure', async () => {
-    apiClient.post = async (url) => {
+    mockApi('post', async (url) => {
       if (url.endsWith('/preview')) {
         return { data: { success: true, data: preview } }
       }
@@ -334,7 +320,7 @@ describe('price source sync dialog', () => {
           },
         },
       }
-    }
+    })
 
     renderDialog()
     await commitPreviewedSync()
@@ -347,7 +333,7 @@ describe('price source sync dialog', () => {
   })
 
   test('warns that a partial commit left some models out', async () => {
-    apiClient.post = async (url) => {
+    mockApi('post', async (url) => {
       if (url.endsWith('/preview')) {
         return { data: { success: true, data: preview } }
       }
@@ -357,7 +343,7 @@ describe('price source sync dialog', () => {
           data: { ...committedRun, status: 'partial', rejected_count: 1 },
         },
       }
-    }
+    })
 
     renderDialog()
     await commitPreviewedSync()
@@ -379,7 +365,7 @@ describe('price source sync dialog', () => {
   // The server refuses a commit for a disabled source, so the dialog must not
   // offer the button that would produce that error.
   test('refuses the commit for a disabled source while keeping the preview', async () => {
-    apiClient.post = async () => ({ data: { success: true, data: preview } })
+    mockApi('post', async () => ({ data: { success: true, data: preview } }))
 
     renderDialog(() => undefined, { enabled: false })
 
@@ -399,9 +385,9 @@ describe('price source sync dialog', () => {
   })
 
   test('keeps the commit unavailable when the preview failed', async () => {
-    apiClient.post = async () => ({
+    mockApi('post', async () => ({
       data: { success: false, message: 'upstream unreachable' },
-    })
+    }))
 
     renderDialog()
     fireEvent.click(screen.getByRole('button', { name: 'Run preview' }))

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 
 	"github.com/stretchr/testify/assert"
@@ -239,7 +240,7 @@ func TestCanonicalSettingsSizeRecheckedAfterEscaping(t *testing.T) {
 	// Raw input ~14KB, canonical form >65535 bytes after escaping.
 	value := strings.Repeat("<", 13000)
 	raw := `{"model_mappings":{"vendor/model":"` + value + `"}}`
-	require.Less(t, len(raw), MaxSourceSettingsBytes, "raw input itself stays under the cap")
+	require.Less(t, len(raw), dto.MaxSourceSettingsBytes, "raw input itself stays under the cap")
 
 	_, err := CanonicalSourceSettingsJSON(raw)
 	require.Error(t, err)
@@ -309,9 +310,9 @@ func TestValidatePriceSourceRoleChannelRules(t *testing.T) {
 }
 
 func TestTruncateUTF8(t *testing.T) {
-	assert.Equal(t, "abc", truncateUTF8("abc", 10))
-	assert.Equal(t, "ab", truncateUTF8("abcd", 2))
+	assert.Equal(t, "abc", common.TruncateUTF8("abc", 10))
+	assert.Equal(t, "ab", common.TruncateUTF8("abcd", 2))
 	// 3-byte runes: cutting at 4 bytes must back off to the rune boundary.
-	assert.Equal(t, "配", truncateUTF8("配置错", 4))
-	assert.Equal(t, "", truncateUTF8("配", 2))
+	assert.Equal(t, "配", common.TruncateUTF8("配置错", 4))
+	assert.Equal(t, "", common.TruncateUTF8("配", 2))
 }

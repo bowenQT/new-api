@@ -7,10 +7,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 )
 
@@ -121,15 +123,11 @@ func ParseSourceSettings(jsonStr string) (SourceSettings, error) {
 	return settings, nil
 }
 
-// MaxSourceSettingsBytes caps the canonical serialized settings. It matches
-// the request DTO limit; the canonical form is re-checked because JSON HTML
-// escaping can inflate the client's raw input.
-const MaxSourceSettingsBytes = 65535
-
 // CanonicalSourceSettingsJSON re-serializes validated settings so the stored
 // value is the canonical form of the parsed structure, never the client's raw
-// JSON. Empty input stays empty; a canonical form over MaxSourceSettingsBytes
-// is refused.
+// JSON. Empty input stays empty; a canonical form over
+// dto.MaxSourceSettingsBytes is refused — the same limit the request carries,
+// re-checked because JSON HTML escaping can inflate the client's raw input.
 func CanonicalSourceSettingsJSON(jsonStr string) (string, error) {
 	if strings.TrimSpace(jsonStr) == "" {
 		return "", nil
@@ -142,8 +140,8 @@ func CanonicalSourceSettingsJSON(jsonStr string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if len(data) > MaxSourceSettingsBytes {
-		return "", fmt.Errorf("canonical settings exceed %d bytes", MaxSourceSettingsBytes)
+	if len(data) > dto.MaxSourceSettingsBytes {
+		return "", fmt.Errorf("canonical settings exceed %d bytes", dto.MaxSourceSettingsBytes)
 	}
 	return string(data), nil
 }
@@ -263,7 +261,7 @@ func ResolveObservationRoleScope(obs Observation, source SourceConfig, adapter A
 	} else if role != source.Role {
 		return "", "", fmt.Errorf("observation role %q exceeds source declaration %q", role, source.Role)
 	}
-	if !containsRole(adapter.AllowedRoles(), role) {
+	if !slices.Contains(adapter.AllowedRoles(), role) {
 		return "", "", fmt.Errorf("role %q not allowed by adapter %q", role, adapter.Key())
 	}
 
@@ -273,26 +271,8 @@ func ResolveObservationRoleScope(obs Observation, source SourceConfig, adapter A
 	} else if scope != source.Scope {
 		return "", "", fmt.Errorf("observation scope %q exceeds source declaration %q", scope, source.Scope)
 	}
-	if !containsScope(adapter.AllowedScopes(), scope) {
+	if !slices.Contains(adapter.AllowedScopes(), scope) {
 		return "", "", fmt.Errorf("scope %q not allowed by adapter %q", scope, adapter.Key())
 	}
 	return role, scope, nil
-}
-
-func containsRole(roles []PriceRole, role PriceRole) bool {
-	for _, candidate := range roles {
-		if candidate == role {
-			return true
-		}
-	}
-	return false
-}
-
-func containsScope(scopes []PriceScope, scope PriceScope) bool {
-	for _, candidate := range scopes {
-		if candidate == scope {
-			return true
-		}
-	}
-	return false
 }

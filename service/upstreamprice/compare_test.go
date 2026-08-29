@@ -2,6 +2,7 @@ package upstreamprice
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -167,21 +168,21 @@ func TestProjectSalePriceModes(t *testing.T) {
 			wantMode:  SaleBillingModeRatio,
 			// (1e6 + 0.5e6*0.1 + 1e6*4) * 1.5 / 500000
 			wantStatus: ProjectionOK,
-			wantAmount: floatPtr((1_000_000 + 500_000*0.1 + 1_000_000*4) * 1.5 / common.QuotaPerUnit),
+			wantAmount: float64Ptr((1_000_000 + 500_000*0.1 + 1_000_000*4) * 1.5 / common.QuotaPerUnit),
 		},
 		{
 			name:       "per-call model price is the USD amount",
 			modelName:  "per-call-model",
 			wantMode:   SaleBillingModePerCall,
 			wantStatus: ProjectionOK,
-			wantAmount: floatPtr(0.04),
+			wantAmount: float64Ptr(0.04),
 		},
 		{
 			name:       "tiered expression divides by one million",
 			modelName:  "tiered-model",
 			wantMode:   SaleBillingModeTieredExpr,
 			wantStatus: ProjectionOK,
-			wantAmount: floatPtr((1_000_000*3 + 1_000_000*15) / 1_000_000),
+			wantAmount: float64Ptr((1_000_000*3 + 1_000_000*15) / 1_000_000),
 		},
 		{
 			name:       "request rules fail closed",
@@ -354,8 +355,45 @@ func TestCompareUpstreamPricesGroupSelection(t *testing.T) {
 	assert.Equal(t, float64(1), unknownGroup.GroupRatio)
 }
 
-func floatPtr(value float64) *float64 {
-	return &value
+// TestCompareUpstreamPricesStaleAlertBasis pins the comparison's alerting
+// contract: its source alerts are the ones evaluated against the timestamp it
+// reports as GeneratedAt, over the sources its own catalog projection covered.
+// The margins around the threshold are wide enough that a clock tick during the
+// request cannot flip the expected verdict; the exact one-second boundary is
+// pinned deterministically in TestCatalogStaleBoundaryIsSharedByEntriesAndAlerts.
+func TestCompareUpstreamPricesStaleAlertBasis(t *testing.T) {
+	cases := []struct {
+		name      string
+		age       int64
+		wantStale bool
+	}{
+		{"an hour inside the threshold", DefaultManualStaleThresholdSeconds - 3600, false},
+		{"an hour past the threshold", DefaultManualStaleThresholdSeconds + 3600, true},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			db := setupCompareTestDB(t)
+			setupCompareSaleConfig(t)
+			channel := &model.Channel{Name: "c", Key: "k", Status: common.ChannelStatusEnabled}
+			require.NoError(t, db.Create(channel).Error)
+			seedCatalogSnapshot(t, db, "cost", RoleSupplierCost, &channel.Id, "tiered-model",
+				`tier("base", p * 1 + c * 5)`, FormulaKindTokenExprV1, "", common.GetTimestamp()-testCase.age)
+
+			response, err := CompareUpstreamPrices(&dto.UpstreamPriceCompareRequest{Models: []string{"tiered-model"}})
+			require.NoError(t, err)
+
+			sources, err := model.GetAllPriceSources()
+			require.NoError(t, err)
+			expected, err := EvaluateSourceAlerts(sources, response.GeneratedAt)
+			require.NoError(t, err)
+			assert.Equal(t, expected, response.Alerts,
+				"the comparison must report exactly the alerts of its own generation timestamp")
+
+			assert.Equal(t, testCase.wantStale, slices.Contains(alertCodeList(response.Alerts), AlertSourceStale))
+			require.Len(t, response.Entries, 1)
+			assert.Equal(t, testCase.wantStale, slices.Contains(response.Entries[0].Statuses, CompareStatusStale))
+		})
+	}
 }
 
 // TestCompareUpstreamPricesFailsClosedOnChangedSourceConfig is the §9.2 /
@@ -432,6 +470,72 @@ func TestCompareUpstreamPricesFailsClosedOnChangedSourceConfig(t *testing.T) {
 	require.NotNil(t, restored.MaxCostUSD)
 	assert.InDelta(t, 6, *restored.MaxCostUSD, 1e-9)
 	assert.NotContains(t, restored.Statuses, CompareStatusSourceConfigChanged)
+}
+
+// TestCompareEvaluatesSourceAlertsOnAFreshSourceRead pins that a comparison
+// evaluates its source alerts against the source configuration in effect when
+// the alerts are evaluated, not against the read its catalog projection used.
+//
+// Projecting a catalog issues many queries, so an administrator repointing a
+// source while a comparison runs is a real interleaving, and it is exactly what
+// source_config_changed exists to report: the projected costs stopped being
+// confirmed. The interleaving is injected deterministically — the adapter key is
+// changed the moment the first read of price_sources returns, so the projection
+// runs on the configuration read before it and only the alert evaluation can see
+// the change.
+func TestCompareEvaluatesSourceAlertsOnAFreshSourceRead(t *testing.T) {
+	db := setupCompareTestDB(t)
+	now := common.GetTimestamp()
+
+	channel := &model.Channel{Name: "fresh-read-channel", Key: "k", Status: common.ChannelStatusEnabled}
+	require.NoError(t, db.Create(channel).Error)
+	source := seedCatalogSnapshot(t, db, "fresh-read-cost", RoleSupplierCost, &channel.Id, "fresh-read-model",
+		`tier("base", p * 1 + c * 2)`, FormulaKindTokenExprV1, "", now)
+
+	// The seeded run recorded the configuration it ran under, so nothing is
+	// changed yet.
+	baseline, err := CompareUpstreamPrices(&dto.UpstreamPriceCompareRequest{Models: []string{"fresh-read-model"}})
+	require.NoError(t, err)
+	for _, alert := range baseline.Alerts {
+		assert.NotEqual(t, AlertSourceConfigChanged, alert.Code)
+	}
+
+	sourceReads := 0
+	require.NoError(t, db.Callback().Query().After("gorm:query").Register("test:repoint_source", func(tx *gorm.DB) {
+		if !strings.Contains(tx.Statement.SQL.String(), "price_sources") {
+			return
+		}
+		sourceReads++
+		if sourceReads > 1 {
+			return
+		}
+		require.NoError(t, model.DB.Model(&model.PriceSource{}).Where("id = ?", source.Id).
+			Update("adapter_key", "repointed_adapter").Error)
+	}))
+	t.Cleanup(func() {
+		_ = db.Callback().Query().After("gorm:query").Remove("test:repoint_source")
+	})
+
+	response, err := CompareUpstreamPrices(&dto.UpstreamPriceCompareRequest{Models: []string{"fresh-read-model"}})
+	require.NoError(t, err)
+	assert.Equal(t, 2, sourceReads,
+		"the comparison must read the registered sources again before evaluating their alerts")
+
+	changed := false
+	for _, alert := range response.Alerts {
+		if alert.Code == AlertSourceConfigChanged && alert.SourceId == source.Id {
+			changed = true
+		}
+	}
+	assert.True(t, changed,
+		"a source repointed during the projection must still raise source_config_changed")
+
+	// The projection itself ran on the configuration read before the change, so
+	// the entry is the pre-change one; the alert is what tells the admin the
+	// projected cost is no longer confirmed.
+	require.Len(t, response.Entries, 1)
+	require.Len(t, response.Entries[0].Costs, 1)
+	assert.False(t, response.Entries[0].Costs[0].SourceConfigChanged)
 }
 
 // TestCompareSourcePriceCarriesSnapshotTimestamps pins that a comparison row

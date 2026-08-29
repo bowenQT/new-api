@@ -29,15 +29,11 @@ import {
   PRICE_JUMP_DIMENSION_LABEL_KEYS,
 } from '../constants'
 import type { PriceAlert, PriceAlertParams } from '../types'
+import { formatPercentRate } from './compare-format'
 
 /** Alert durations are reported in seconds; the admin reads them in hours. */
 function hoursOf(seconds: number): string {
   return (seconds / 3600).toFixed(1)
-}
-
-/** The coverage gate is a drop fraction; it is shown as a percentage. */
-function percentOf(fraction: number): string {
-  return `${(fraction * 100).toFixed(2)}%`
 }
 
 /**
@@ -94,7 +90,7 @@ function priceJumpDetail(t: TFunction, params: PriceAlertParams): string {
       model,
       previous: usdOf(params.previous_usd),
       current: usdOf(params.current_usd),
-      rate: percentOf(params.change_rate),
+      rate: formatPercentRate(params.change_rate),
       context: params.probe_context ?? '',
     }
   )
@@ -156,7 +152,7 @@ export function priceAlertDetail(t: TFunction, alert: PriceAlert): string {
       runId: params.run_id,
       previous: params.previous_valid_count,
       current: params.valid_count,
-      gate: percentOf(params.drop_threshold),
+      gate: formatPercentRate(params.drop_threshold),
     }
     // A refused run committed nothing, which is a different fact from a drop
     // observed between two runs that both committed, so it gets its own wording.

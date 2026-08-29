@@ -28,15 +28,11 @@ import { PriceSourcesPanel } from './components/price-sources-panel'
 import {
   PRICE_CATALOG_DEFAULT_SECTION,
   PRICE_CATALOG_SECTION_IDS,
+  PRICE_CATALOG_SECTION_TITLE_KEYS,
   type PriceCatalogSectionId,
 } from './section-registry'
 
 const route = getRouteApi('/_authenticated/price-catalog/$section')
-
-const SECTION_TITLE_KEYS: Record<PriceCatalogSectionId, string> = {
-  sources: 'Price Sources',
-  compare: 'Price Comparison',
-}
 
 export function PriceCatalog() {
   const { t } = useTranslation()
@@ -50,7 +46,7 @@ export function PriceCatalog() {
       <SectionPageLayout.Title>
         <span className='inline-flex min-w-0 items-center gap-2'>
           <span className='truncate'>
-            {t(SECTION_TITLE_KEYS[activeSection])}
+            {t(PRICE_CATALOG_SECTION_TITLE_KEYS[activeSection])}
           </span>
           <Badge variant='outline' className='shrink-0'>
             Root
@@ -71,7 +67,7 @@ export function PriceCatalog() {
             <TabsList className='max-w-full flex-wrap justify-start group-data-horizontal/tabs:h-auto'>
               {PRICE_CATALOG_SECTION_IDS.map((section) => (
                 <TabsTrigger key={section} value={section}>
-                  {t(SECTION_TITLE_KEYS[section])}
+                  {t(PRICE_CATALOG_SECTION_TITLE_KEYS[section])}
                 </TabsTrigger>
               ))}
             </TabsList>

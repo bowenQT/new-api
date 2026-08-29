@@ -1,13 +1,9 @@
 package upstreamprice
 
 import (
-	"errors"
-
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
-
-	"gorm.io/gorm"
 )
 
 // Catalog status values exposed by the current-price query (spec §8.3).
@@ -33,6 +29,18 @@ func staleThresholdSeconds(source *model.PriceSource, settings SourceSettings) i
 	return DefaultManualStaleThresholdSeconds
 }
 
+// sourceStale reports whether a source's last successful run finished longer
+// ago than its staleness threshold (spec §8.3). A run with no recorded finish
+// time is never stale: its age is unknown, and an unknown age is not a claim
+// the catalog makes. The role gate — only a supplier cost going stale is a
+// health problem — belongs to the caller, not here.
+func sourceStale(source *model.PriceSource, settings SourceSettings, run *model.PriceSyncRun, now int64) bool {
+	if run == nil || run.FinishedAt == nil {
+		return false
+	}
+	return now-*run.FinishedAt > staleThresholdSeconds(source, settings)
+}
+
 // GetCurrentUpstreamPrices projects the current price catalog (spec §8.3):
 // current entries are the valid run items of each source's last successful
 // run; missing entries keep their last observed snapshot but are labeled;
@@ -55,20 +63,33 @@ func GetCurrentUpstreamPrices(sourceId *int) (*dto.UpstreamCurrentPriceResponse,
 	}
 
 	now := common.GetTimestamp()
-	response := &dto.UpstreamCurrentPriceResponse{GeneratedAt: now}
-	for _, source := range sources {
-		entries, err := currentEntriesForSource(source, now)
-		if err != nil {
-			return nil, err
-		}
-		response.Entries = append(response.Entries, entries...)
+	entries, err := currentPriceEntries(sources, now)
+	if err != nil {
+		return nil, err
 	}
 	alerts, err := EvaluateSourceAlerts(sources, now)
 	if err != nil {
 		return nil, err
 	}
-	response.Alerts = alerts
-	return response, nil
+	return &dto.UpstreamCurrentPriceResponse{GeneratedAt: now, Entries: entries, Alerts: alerts}, nil
+}
+
+// currentPriceEntries is the entry half of the catalog projection: it labels
+// every source model of the given sources against the given time and evaluates
+// no alert at all. The comparison needs exactly this half — it raises the
+// source alerts itself, against its own generation timestamp — so keeping the
+// two separable is what stops a caller from paying for an alert evaluation it
+// discards.
+func currentPriceEntries(sources []*model.PriceSource, now int64) ([]dto.UpstreamCurrentPriceEntry, error) {
+	var entries []dto.UpstreamCurrentPriceEntry
+	for _, source := range sources {
+		sourceEntries, err := currentEntriesForSource(source, now)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, sourceEntries...)
+	}
+	return entries, nil
 }
 
 func currentEntriesForSource(source *model.PriceSource, now int64) ([]dto.UpstreamCurrentPriceEntry, error) {
@@ -87,10 +108,7 @@ func currentEntriesForSource(source *model.PriceSource, now int64) ([]dto.Upstre
 	if err != nil {
 		return nil, err
 	}
-	stale := false
-	if run.FinishedAt != nil {
-		stale = now-*run.FinishedAt > staleThresholdSeconds(source, config.Settings)
-	}
+	stale := sourceStale(source, config.Settings, run, now)
 	// The run's observations describe the configuration it ran under; if the
 	// source has since been pointed at another channel, adapter, role, scope,
 	// or settings, they are labeled and stop counting as confirmed costs.
@@ -101,9 +119,13 @@ func currentEntriesForSource(source *model.PriceSource, now int64) ([]dto.Upstre
 	}
 
 	snapshotIds := make([]int, 0, len(items))
+	missingModels := make([]string, 0)
 	for _, item := range items {
 		if item.Status == model.PriceSyncItemStatusValid && item.SnapshotId != nil {
 			snapshotIds = append(snapshotIds, *item.SnapshotId)
+		}
+		if item.Status == model.PriceSyncItemStatusMissing {
+			missingModels = append(missingModels, item.SourceModelName)
 		}
 	}
 	snapshots, err := model.GetPriceSnapshotsByIds(snapshotIds)
@@ -113,6 +135,12 @@ func currentEntriesForSource(source *model.PriceSource, now int64) ([]dto.Upstre
 	snapshotById := make(map[int]*model.PriceSnapshot, len(snapshots))
 	for _, snapshot := range snapshots {
 		snapshotById[snapshot.Id] = snapshot
+	}
+	// Models the source stopped returning keep their last observed snapshot;
+	// they are looked up for the whole run at once, never one query per model.
+	lastSnapshotByModel, err := model.GetLatestPriceSnapshotsForModels(source.Id, missingModels)
+	if err != nil {
+		return nil, err
 	}
 
 	entries := make([]dto.UpstreamCurrentPriceEntry, 0, len(items))
@@ -142,11 +170,7 @@ func currentEntriesForSource(source *model.PriceSource, now int64) ([]dto.Upstre
 			fillEntryFromSnapshot(&entry, snapshot)
 		case model.PriceSyncItemStatusMissing:
 			entry.Status = CatalogStatusMissing
-			lastSnapshot, err := model.GetLatestPriceSnapshotForModel(source.Id, item.SourceModelName)
-			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-				return nil, err
-			}
-			if lastSnapshot != nil {
+			if lastSnapshot := lastSnapshotByModel[item.SourceModelName]; lastSnapshot != nil {
 				fillEntryFromSnapshot(&entry, lastSnapshot)
 			}
 		case model.PriceSyncItemStatusUnsupported:

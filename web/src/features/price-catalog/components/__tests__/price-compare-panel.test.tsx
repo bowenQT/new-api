@@ -16,22 +16,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, test } from 'vitest'
-
-import { api } from '@/lib/api'
 
 import type { PriceCompareResponse } from '../../types'
 import { PriceComparePanel } from '../price-compare-panel'
+import {
+  mockApi,
+  renderWithQueryClient,
+  resetCatalogTestEnv,
+} from './test-utils'
 
-type ApiMethod = (url: string, data?: unknown) => Promise<{ data: unknown }>
-type MockableApi = { get: ApiMethod; post: ApiMethod }
-
-const apiClient = api as unknown as MockableApi
-const originalGet = apiClient.get
-const originalPost = apiClient.post
-let queryClient: QueryClient | null = null
 let requestedUrls: string[] = []
 let comparePayloads: unknown[] = []
 
@@ -85,14 +80,14 @@ const comparison: PriceCompareResponse = {
 function installApi(compare: PriceCompareResponse | Error) {
   requestedUrls = []
   comparePayloads = []
-  apiClient.get = async (url) => {
+  mockApi('get', async (url) => {
     requestedUrls.push(url)
     if (url === '/api/group') {
       return { data: { success: true, data: ['default', 'vip'] } }
     }
     throw new Error(`Unexpected GET ${url}`)
-  }
-  apiClient.post = async (url, data) => {
+  })
+  mockApi('post', async (url, data) => {
     requestedUrls.push(url)
     if (url !== '/api/upstream-prices/compare') {
       throw new Error(`Unexpected POST ${url}`)
@@ -100,31 +95,19 @@ function installApi(compare: PriceCompareResponse | Error) {
     comparePayloads.push(data)
     if (compare instanceof Error) throw compare
     return { data: { success: true, data: compare } }
-  }
+  })
 }
 
 function renderPanel() {
-  queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  })
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <PriceComparePanel />
-    </QueryClientProvider>
-  )
+  return renderWithQueryClient(<PriceComparePanel />)
 }
 
-afterEach(() => {
-  apiClient.get = originalGet
-  apiClient.post = originalPost
-  queryClient?.clear()
-  queryClient = null
-})
+afterEach(resetCatalogTestEnv)
 
 describe('price comparison panel', () => {
   test('shows no comparison table while the comparison request is pending', () => {
-    apiClient.get = async () => ({ data: { success: true, data: [] } })
-    apiClient.post = () => new Promise(() => undefined)
+    mockApi('get', async () => ({ data: { success: true, data: [] } }))
+    mockApi('post', () => new Promise(() => undefined))
 
     renderPanel()
 

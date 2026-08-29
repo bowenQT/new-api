@@ -3,8 +3,9 @@ package upstreamprice
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"math"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -147,18 +148,33 @@ func boundedUSD(value float64) (float64, bool) {
 	return value, true
 }
 
-// CompareUpstreamPrices projects the current sale price, every catalog cost,
-// and the resulting estimated margin for the requested models onto one usage
-// vector (spec §9.2, §9.3).
-func CompareUpstreamPrices(request *dto.UpstreamPriceCompareRequest) (*dto.UpstreamPriceCompareResponse, error) {
-	if request == nil {
-		return nil, errors.New("nil compare request")
-	}
-	if err := request.Validate(); err != nil {
-		return nil, err
-	}
+// compareBasis is everything a comparison needs besides the model list: the
+// sale group it projects against, the usage vector it applies, and the catalog
+// prices it compares, indexed by canonical model name. The comparison endpoint
+// builds one per request and the post-write cost inversion check builds one and
+// reuses it for every batch of models, so both resolve the group, refuse the
+// same unusable group ratios, project the catalog the same way, and describe an
+// inversion identically.
+type compareBasis struct {
+	group           string
+	groupRatio      float64
+	groupConfigured bool
+	usage           appliedUsage
+	params          billingexpr.TokenParams
+	pricesByModel   map[string][]dto.UpstreamCurrentPriceEntry
+}
 
-	group := strings.TrimSpace(request.Group)
+// newCompareBasis resolves the sale group and usage vector of one comparison
+// and projects the catalog it compares against. The group is resolved before
+// the catalog is read, so a group whose ratio is not a usable multiplier is
+// refused on that ground rather than silently projected at 1 — a corrupt group
+// ratio would otherwise turn every margin computed against it into a fiction.
+//
+// The catalog is projected without its own alert evaluation: a caller that
+// reports source alerts evaluates them against its own fresh read of the
+// registered sources, not against the read this projection happened to use.
+func newCompareBasis(requestedGroup string, requestedUsage *dto.UpstreamPriceUsageVector) (*compareBasis, error) {
+	group := strings.TrimSpace(requestedGroup)
 	if group == "" {
 		group = DefaultCompareGroup
 	}
@@ -171,53 +187,97 @@ func CompareUpstreamPrices(request *dto.UpstreamPriceCompareRequest) (*dto.Upstr
 		return nil, fmt.Errorf("group %q has an unusable group ratio", group)
 	}
 
-	usage := resolveUsage(request.Usage)
-	params := usage.tokenParams()
-
-	catalog, err := GetCurrentUpstreamPrices(nil)
+	sources, err := model.GetAllPriceSources()
+	if err != nil {
+		return nil, err
+	}
+	catalogEntries, err := currentPriceEntries(sources, common.GetTimestamp())
 	if err != nil {
 		return nil, err
 	}
 	pricesByModel := make(map[string][]dto.UpstreamCurrentPriceEntry)
-	for _, entry := range catalog.Entries {
+	for _, entry := range catalogEntries {
 		if entry.CanonicalModelName == "" {
 			continue
 		}
 		pricesByModel[entry.CanonicalModelName] = append(pricesByModel[entry.CanonicalModelName], entry)
 	}
 
-	modelNames, total, truncated := selectCompareModels(request.Models, request.ModelFilter, pricesByModel)
+	usage := resolveUsage(requestedUsage)
+	return &compareBasis{
+		group:           group,
+		groupRatio:      groupRatio,
+		groupConfigured: groupConfigured,
+		usage:           usage,
+		params:          usage.tokenParams(),
+		pricesByModel:   pricesByModel,
+	}, nil
+}
 
+// compare builds the comparison entries of the named models together with the
+// cost inversion alerts they raise.
+func (b *compareBasis) compare(modelNames []string) ([]dto.UpstreamPriceCompareEntry, []dto.UpstreamPriceAlert) {
+	entries := make([]dto.UpstreamPriceCompareEntry, 0, len(modelNames))
+	alerts := make([]dto.UpstreamPriceAlert, 0)
+	for _, modelName := range modelNames {
+		entry := buildCompareEntry(modelName, b.pricesByModel[modelName], b.params, b.usage, b.groupRatio)
+		if entry.CostInverted {
+			alerts = append(alerts, dto.UpstreamPriceAlert{
+				Code:               AlertCostInversion,
+				CanonicalModelName: modelName,
+				Detail:             fmt.Sprintf("worst cost exceeds the projected sale price for group %q", b.group),
+				Params:             &dto.UpstreamPriceAlertParams{Group: b.group},
+			})
+		}
+		entries = append(entries, entry)
+	}
+	return entries, alerts
+}
+
+// CompareUpstreamPrices projects the current sale price, every catalog cost,
+// and the resulting estimated margin for the requested models onto one usage
+// vector (spec §9.2, §9.3).
+func CompareUpstreamPrices(request *dto.UpstreamPriceCompareRequest) (*dto.UpstreamPriceCompareResponse, error) {
+	if request == nil {
+		return nil, errors.New("nil compare request")
+	}
+	if err := request.Validate(); err != nil {
+		return nil, err
+	}
+
+	basis, err := newCompareBasis(request.Group, request.Usage)
+	if err != nil {
+		return nil, err
+	}
+	modelNames, total, truncated := selectCompareModels(request.Models, request.ModelFilter, basis.pricesByModel)
+
+	generatedAt := common.GetTimestamp()
+	entries, alerts := basis.compare(modelNames)
 	response := &dto.UpstreamPriceCompareResponse{
-		GeneratedAt:          common.GetTimestamp(),
-		Group:                group,
-		GroupRatio:           groupRatio,
-		GroupRatioConfigured: groupConfigured,
+		GeneratedAt:          generatedAt,
+		Group:                basis.group,
+		GroupRatio:           basis.groupRatio,
+		GroupRatioConfigured: basis.groupConfigured,
 		Usage: dto.UpstreamPriceAppliedUsage{
-			PromptTokens:        usage.P,
-			CompletionTokens:    usage.C,
-			CacheReadTokens:     usage.CR,
-			CacheCreationTokens: usage.CC,
+			PromptTokens:        basis.usage.P,
+			CompletionTokens:    basis.usage.C,
+			CacheReadTokens:     basis.usage.CR,
+			CacheCreationTokens: basis.usage.CC,
 		},
 		TotalModels:     total,
 		Truncated:       truncated,
 		ExcludedFactors: append([]string{}, compareExcludedFactors...),
-		Entries:         make([]dto.UpstreamPriceCompareEntry, 0, len(modelNames)),
-		Alerts:          make([]dto.UpstreamPriceAlert, 0),
-	}
-	for _, modelName := range modelNames {
-		entry := buildCompareEntry(modelName, pricesByModel[modelName], params, usage, groupRatio)
-		if entry.CostInverted {
-			response.Alerts = append(response.Alerts, dto.UpstreamPriceAlert{
-				Code:               AlertCostInversion,
-				CanonicalModelName: modelName,
-				Detail:             fmt.Sprintf("worst cost exceeds the projected sale price for group %q", group),
-				Params:             &dto.UpstreamPriceAlertParams{Group: group},
-			})
-		}
-		response.Entries = append(response.Entries, entry)
+		Entries:         entries,
+		Alerts:          alerts,
 	}
 
+	// Source alerts are evaluated against a fresh read of the registered
+	// sources, not against the read the projection above used. Projecting a
+	// whole catalog issues many queries, and an administrator repointing a
+	// source while it runs is exactly what source_config_changed exists to
+	// report: reusing the earlier read would describe the configuration as it
+	// stood before that change and silently withhold the alert that says the
+	// projected costs are no longer confirmed.
 	sources, err := model.GetAllPriceSources()
 	if err != nil {
 		return nil, err
@@ -259,7 +319,7 @@ func selectCompareModels(requested []string, modelFilter string, pricesByModel m
 		}
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	total := len(names)
 	if total > MaxCompareModels {
 		return names[:MaxCompareModels], total, true
@@ -333,12 +393,10 @@ func buildCompareEntry(modelName string, catalogEntries []dto.UpstreamCurrentPri
 		if price.UsableForMargin && price.AmountUSD != nil {
 			amount := *price.AmountUSD
 			if minCost == nil || amount < *minCost {
-				value := amount
-				minCost = &value
+				minCost = common.GetPointer(amount)
 			}
 			if maxCost == nil || amount > *maxCost {
-				value := amount
-				maxCost = &value
+				maxCost = common.GetPointer(amount)
 			}
 			if price.Stale || price.VariesByProvider || price.Orphaned || price.CanonicalConflict {
 				entry.CostConfirmed = false
@@ -372,17 +430,8 @@ func buildCompareEntry(modelName string, catalogEntries []dto.UpstreamCurrentPri
 		}
 	}
 
-	entry.Statuses = sortedStatusList(statuses)
+	entry.Statuses = slices.Sorted(maps.Keys(statuses))
 	return entry
-}
-
-func sortedStatusList(statuses map[string]bool) []string {
-	list := make([]string, 0, len(statuses))
-	for status := range statuses {
-		list = append(list, status)
-	}
-	sort.Strings(list)
-	return list
 }
 
 // projectCatalogEntry converts one catalog row into a projected USD amount

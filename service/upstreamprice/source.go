@@ -119,9 +119,7 @@ func ListPriceSources() ([]dto.UpstreamPriceSourceView, error) {
 				view.LastSuccessFinishedAt = run.FinishedAt
 				view.CoverageCount = run.ValidCount
 				view.MissingCount = run.MissingCount
-				if run.FinishedAt != nil {
-					view.Stale = now-*run.FinishedAt > staleThresholdSeconds(source, config.Settings)
-				}
+				view.Stale = sourceStale(source, config.Settings, run, now)
 			}
 		}
 		views = append(views, view)

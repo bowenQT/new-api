@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"net/url"
 	"sort"
 	"strings"
 
@@ -98,22 +96,6 @@ func (a *CuratedReferenceAdapter) Endpoint() string {
 	return a.endpoint
 }
 
-func (a *CuratedReferenceAdapter) validateEndpoint() error {
-	parsed, err := url.Parse(a.endpoint)
-	if err != nil {
-		return fmt.Errorf("invalid %s endpoint: %w", a.key, err)
-	}
-	if a.allowTestEndpoint {
-		return nil
-	}
-	// Exact host match only, so a suffix-forged domain such as
-	// "models.dev.evil.example" is refused.
-	if parsed.Scheme != "https" || parsed.Hostname() != a.host {
-		return fmt.Errorf("%s adapter only accepts %s", a.key, a.endpoint)
-	}
-	return nil
-}
-
 func (a *CuratedReferenceAdapter) Fetch(ctx context.Context, source upstreamprice.SourceConfig) ([]upstreamprice.Observation, upstreamprice.FetchMeta, error) {
 	return a.fetch(ctx, "")
 }
@@ -146,7 +128,7 @@ func isEntityTag(value string) bool {
 
 func (a *CuratedReferenceAdapter) fetch(ctx context.Context, ifNoneMatch string) ([]upstreamprice.Observation, upstreamprice.FetchMeta, error) {
 	meta := upstreamprice.FetchMeta{}
-	if err := a.validateEndpoint(); err != nil {
+	if err := upstreamprice.ValidatePinnedEndpoint(a.key, a.endpoint, a.host, a.allowTestEndpoint); err != nil {
 		return nil, meta, err
 	}
 	if !isEntityTag(ifNoneMatch) {
@@ -183,17 +165,10 @@ func (a *CuratedReferenceAdapter) fetch(ctx context.Context, ifNoneMatch string)
 		return nil, meta, fmt.Errorf("%s fetch: http %d", a.key, response.StatusCode)
 	}
 
-	maxResponseBytes := a.maxResponseBytes
-	if maxResponseBytes <= 0 {
-		maxResponseBytes = upstreamprice.MaxFetchResponseBytes
-	}
-	body, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
+	body, readBytes, err := upstreamprice.ReadBoundedCatalogBody(response.Body, a.maxResponseBytes)
+	meta.ResponseBytes = readBytes
 	if err != nil {
-		return nil, meta, fmt.Errorf("%s fetch: read failed: %w", a.key, err)
-	}
-	meta.ResponseBytes = int64(len(body))
-	if int64(len(body)) > maxResponseBytes {
-		return nil, meta, fmt.Errorf("%s fetch: response exceeds %d bytes", a.key, maxResponseBytes)
+		return nil, meta, fmt.Errorf("%s fetch: %w", a.key, err)
 	}
 
 	observations, skipped, discovered, err := parseCuratedCatalog(body)

@@ -13,8 +13,10 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -120,6 +122,49 @@ func DoCatalogRequest(ctx context.Context, client *http.Client, buildRequest fun
 	return nil, lastErr
 }
 
+// ValidatePinnedEndpoint refuses to fetch from anything but the adapter's own
+// pinned public catalog URL: https only, and an exact host match so a
+// suffix-forged domain such as "models.dev.evil.example" is rejected (spec
+// §12). label names the adapter in the error text. allowTestEndpoint is the
+// package-internal escape hatch adapters expose to their own tests so a fixture
+// can be served from httptest; production constructors never set it.
+func ValidatePinnedEndpoint(label string, endpoint string, host string, allowTestEndpoint bool) error {
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		return fmt.Errorf("invalid %s endpoint: %w", label, err)
+	}
+	if allowTestEndpoint {
+		return nil
+	}
+	if parsed.Scheme != "https" || parsed.Hostname() != host {
+		return fmt.Errorf("%s adapter only accepts %s", label, endpoint)
+	}
+	return nil
+}
+
+// ReadBoundedCatalogBody reads a catalog response body under an explicit size
+// bound, reading one byte past it so an oversized body is detected rather than
+// silently truncated into a parseable prefix. maxResponseBytes falls back to
+// MaxFetchResponseBytes when the adapter declares no limit of its own.
+//
+// The returned byte count is what the run records as its response size: it is
+// reported for an oversized body too, and stays zero when the read itself
+// failed. Callers wrap the returned error with their own adapter prefix; it
+// never carries any part of the response.
+func ReadBoundedCatalogBody(body io.Reader, maxResponseBytes int64) ([]byte, int64, error) {
+	if maxResponseBytes <= 0 {
+		maxResponseBytes = MaxFetchResponseBytes
+	}
+	read, err := io.ReadAll(io.LimitReader(body, maxResponseBytes+1))
+	if err != nil {
+		return nil, 0, fmt.Errorf("read failed: %w", err)
+	}
+	if int64(len(read)) > maxResponseBytes {
+		return nil, int64(len(read)), fmt.Errorf("response exceeds %d bytes", maxResponseBytes)
+	}
+	return read, int64(len(read)), nil
+}
+
 // NewCatalogHTTPClient builds the hardened HTTP client all price adapters
 // must use: redirects are rejected outright, and connection plus total
 // timeouts are enforced. It intentionally does not reuse the ratio_sync
@@ -194,13 +239,7 @@ func signPreviewClaim(claim previewClaim) (string, error) {
 }
 
 func verifyPreviewToken(token string, now time.Time) (*previewClaim, error) {
-	dot := -1
-	for i := range token {
-		if token[i] == '.' {
-			dot = i
-			break
-		}
-	}
+	dot := strings.IndexByte(token, '.')
 	if dot <= 0 || dot == len(token)-1 {
 		return nil, errors.New("malformed preview token")
 	}
@@ -252,7 +291,7 @@ func boundSourceModelIdentity(name string) (string, bool) {
 		return name, false
 	}
 	digest := sha256.Sum256([]byte(name))
-	return truncateUTF8(name, 200) + "#" + hex.EncodeToString(digest[:6]), true
+	return common.TruncateUTF8(name, 200) + "#" + hex.EncodeToString(digest[:6]), true
 }
 
 type plannedItem struct {
@@ -866,7 +905,7 @@ func SyncPriceSource(ctx context.Context, sourceId int, previewToken string) (*d
 	if planErr != nil {
 		return nil, recordSyncPlanFailure(ctx, source, plan, planErr)
 	}
-	if !intPtrEqual(claim.BaseRunId, plan.BaseRunId) {
+	if !model.IntPtrEqual(claim.BaseRunId, plan.BaseRunId) {
 		return nil, model.ErrPriceSyncConflict
 	}
 	if claim.GateThreshold != strconv.FormatFloat(plan.GateThreshold, 'f', -1, 64) {
@@ -1057,7 +1096,7 @@ func buildRunFromPlan(plan *syncPlan, errorSummary string) model.PriceSyncRun {
 		SourceConfigRevision: plan.Source.ConfigRevision,
 		ResponseBytes:        plan.Meta.ResponseBytes,
 		SourceConfigDigest:   sourceConfigDigest(plan.Source),
-		SourceRevision:       truncateUTF8(plan.Meta.SourceRevision, MaxSourceRevisionLength),
+		SourceRevision:       common.TruncateUTF8(plan.Meta.SourceRevision, MaxSourceRevisionLength),
 		DiscoveredCount:      plan.Meta.Discovered,
 		ValidCount:           plan.ValidCount,
 		UnsupportedCount:     plan.UnsupportedCount,
@@ -1198,11 +1237,4 @@ func IsPriceSourceOrphaned(source *model.PriceSource) (bool, error) {
 		return true, nil
 	}
 	return false, err
-}
-
-func intPtrEqual(a, b *int) bool {
-	if a == nil || b == nil {
-		return a == nil && b == nil
-	}
-	return *a == *b
 }

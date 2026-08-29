@@ -3,6 +3,7 @@ package upstreamprice
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
@@ -59,13 +60,12 @@ func EvaluateSourceAlerts(sources []*model.PriceSource, now int64) ([]dto.Upstre
 			failures++
 		}
 		if failures >= ConsecutiveFailureAlertThreshold {
-			failureCount := failures
 			alerts = append(alerts, dto.UpstreamPriceAlert{
 				Code:       AlertSourceConsecutiveFailures,
 				SourceId:   source.Id,
 				SourceName: source.Name,
 				Detail:     fmt.Sprintf("last %d sync runs failed", failures),
-				Params:     &dto.UpstreamPriceAlertParams{FailureCount: &failureCount},
+				Params:     &dto.UpstreamPriceAlertParams{FailureCount: common.GetPointer(failures)},
 			})
 		}
 
@@ -73,33 +73,32 @@ func EvaluateSourceAlerts(sources []*model.PriceSource, now int64) ([]dto.Upstre
 		if err != nil {
 			return nil, err
 		}
-		if len(successfulRuns) > 0 && priceSourceConfigChanged(config, successfulRuns[0]) {
-			runId := successfulRuns[0].Id
-			alerts = append(alerts, dto.UpstreamPriceAlert{
-				Code:       AlertSourceConfigChanged,
-				SourceId:   source.Id,
-				SourceName: source.Name,
-				Detail:     fmt.Sprintf("source configuration changed after run %d; its prices are not confirmed until the next successful sync", runId),
-				Params:     &dto.UpstreamPriceAlertParams{RunId: &runId},
-			})
-		}
 		if len(successfulRuns) > 0 {
-			alerts = append(alerts, priceJumpAlerts(source, successfulRuns[0])...)
-		}
-		if len(successfulRuns) > 0 && PriceRole(source.Role) == RoleSupplierCost {
 			latest := successfulRuns[0]
-			threshold := staleThresholdSeconds(source, config.Settings)
-			if latest.FinishedAt != nil && now-*latest.FinishedAt > threshold {
-				runId, age, thresholdSeconds := latest.Id, now-*latest.FinishedAt, threshold
+			if priceSourceConfigChanged(config, latest) {
+				alerts = append(alerts, dto.UpstreamPriceAlert{
+					Code:       AlertSourceConfigChanged,
+					SourceId:   source.Id,
+					SourceName: source.Name,
+					Detail:     fmt.Sprintf("source configuration changed after run %d; its prices are not confirmed until the next successful sync", latest.Id),
+					Params:     &dto.UpstreamPriceAlertParams{RunId: common.GetPointer(latest.Id)},
+				})
+			}
+			alerts = append(alerts, priceJumpAlerts(source, latest)...)
+			// The role gate stays here rather than inside sourceStale: a cost
+			// nobody can bill against going stale is the health problem, while a
+			// reference price is allowed to age without raising anything.
+			if PriceRole(source.Role) == RoleSupplierCost && sourceStale(source, config.Settings, latest, now) {
+				age, threshold := now-*latest.FinishedAt, staleThresholdSeconds(source, config.Settings)
 				alerts = append(alerts, dto.UpstreamPriceAlert{
 					Code:       AlertSourceStale,
 					SourceId:   source.Id,
 					SourceName: source.Name,
-					Detail:     fmt.Sprintf("last successful run is %d seconds old, threshold %d seconds", age, thresholdSeconds),
+					Detail:     fmt.Sprintf("last successful run is %d seconds old, threshold %d seconds", age, threshold),
 					Params: &dto.UpstreamPriceAlertParams{
-						RunId:            &runId,
-						AgeSeconds:       &age,
-						ThresholdSeconds: &thresholdSeconds,
+						RunId:            common.GetPointer(latest.Id),
+						AgeSeconds:       common.GetPointer(age),
+						ThresholdSeconds: common.GetPointer(threshold),
 					},
 				})
 			}
@@ -159,18 +158,17 @@ func coverageDropAlert(source *model.PriceSource, baseline, observed *model.Pric
 		detail = fmt.Sprintf("run %d was refused by the coverage gate: valid model coverage fell from %d to %d (gate %.4f)",
 			observed.Id, baseline.ValidCount, observed.ValidCount, gate)
 	}
-	runId, previousValid, validCount, dropThreshold, refused := observed.Id, baseline.ValidCount, observed.ValidCount, gate, gateRefused
 	return dto.UpstreamPriceAlert{
 		Code:       AlertCoverageDrop,
 		SourceId:   source.Id,
 		SourceName: source.Name,
 		Detail:     detail,
 		Params: &dto.UpstreamPriceAlertParams{
-			RunId:              &runId,
-			PreviousValidCount: &previousValid,
-			ValidCount:         &validCount,
-			DropThreshold:      &dropThreshold,
-			GateRefused:        &refused,
+			RunId:              common.GetPointer(observed.Id),
+			PreviousValidCount: common.GetPointer(baseline.ValidCount),
+			ValidCount:         common.GetPointer(observed.ValidCount),
+			DropThreshold:      common.GetPointer(gate),
+			GateRefused:        common.GetPointer(gateRefused),
 		},
 	}
 }
@@ -206,8 +204,7 @@ func priceJumpAlerts(source *model.PriceSource, run *model.PriceSyncRun) []dto.U
 			ReportedCount:   &reported,
 		}
 		if entry.FromZero {
-			fromZero := true
-			params.FromZero = &fromZero
+			params.FromZero = common.GetPointer(true)
 		}
 		alerts = append(alerts, dto.UpstreamPriceAlert{
 			Code:               AlertPriceJump,
@@ -296,24 +293,27 @@ func LogCatalogAlertsAfterWrite(ctx context.Context, sourceId int, canonicalMode
 // run over the whole catalog: a manual commit is an interactive request, and a
 // model no sync touched cannot have changed its cost. Models are compared in
 // request-sized batches so a source larger than the per-request cap is still
-// covered end to end.
+// covered end to end, but the batches share one projection basis: the batch
+// size is the unit the comparison is specified in, not a reason to re-read the
+// whole catalog per batch.
+//
+// This path evaluates no source-level alert, so unlike CompareUpstreamPrices it
+// needs no second read of the registered sources: a cost inversion is a
+// model-level comparison of a projected cost against the sale price, and the
+// caller has already evaluated and logged the source alerts of the source this
+// write touched.
 func logCostInversionAlerts(ctx context.Context, canonicalModels []string) {
-	for start := 0; start < len(canonicalModels); start += dto.MaxCompareModelsRequested {
-		end := start + dto.MaxCompareModelsRequested
-		if end > len(canonicalModels) {
-			end = len(canonicalModels)
-		}
-		comparison, err := CompareUpstreamPrices(&dto.UpstreamPriceCompareRequest{Models: canonicalModels[start:end]})
-		if err != nil {
-			common.SysError(fmt.Sprintf("upstream price cost inversion check failed: %v", err))
-			return
-		}
-		inversions := make([]dto.UpstreamPriceAlert, 0)
-		for _, alert := range comparison.Alerts {
-			if alert.Code == AlertCostInversion {
-				inversions = append(inversions, alert)
-			}
-		}
+	if len(canonicalModels) == 0 {
+		return
+	}
+	basis, err := newCompareBasis("", nil)
+	if err != nil {
+		common.SysError(fmt.Sprintf("upstream price cost inversion check failed: %v", err))
+		return
+	}
+	for batch := range slices.Chunk(canonicalModels, dto.MaxCompareModelsRequested) {
+		names, _, _ := selectCompareModels(batch, "", basis.pricesByModel)
+		_, inversions := basis.compare(names)
 		LogPriceCatalogAlerts(ctx, inversions)
 	}
 }

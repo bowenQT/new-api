@@ -22,6 +22,20 @@ func LocalLogPreview(content string) string {
 	return fmt.Sprintf("%s... [truncated, original_length=%d, limit=%d]", content[:LocalLogContentLimit], len(content), LocalLogContentLimit)
 }
 
+// TruncateUTF8 cuts a string to at most max bytes without splitting a UTF-8
+// sequence, so a value stored in a byte-bounded column never ends in a broken
+// rune. A cut that would land inside a sequence drops that whole sequence.
+func TruncateUTF8(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	cut := max
+	for cut > 0 && s[cut]&0xC0 == 0x80 {
+		cut--
+	}
+	return s[:cut]
+}
+
 func GetStringIfEmpty(str string, defaultValue string) string {
 	if str == "" {
 		return defaultValue

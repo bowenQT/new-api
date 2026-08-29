@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -217,10 +218,10 @@ func ValidatePriceSourceForWrite(source *model.PriceSource) error {
 	if !ok {
 		return fmt.Errorf("unknown adapter key %q", source.AdapterKey)
 	}
-	if !containsRole(adapter.AllowedRoles(), role) {
+	if !slices.Contains(adapter.AllowedRoles(), role) {
 		return fmt.Errorf("adapter %q does not allow role %q", source.AdapterKey, source.Role)
 	}
-	if !containsScope(adapter.AllowedScopes(), scope) {
+	if !slices.Contains(adapter.AllowedScopes(), scope) {
 		return fmt.Errorf("adapter %q does not allow scope %q", source.AdapterKey, source.Scope)
 	}
 	if !adapter.Supports(config) {

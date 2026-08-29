@@ -53,16 +53,14 @@ func curatedReferenceSourceConfig(adapterKey string) upstreamprice.SourceConfig 
 // fetch (spec §12).
 func TestCuratedReferenceEndpointPinning(t *testing.T) {
 	for _, adapter := range []*CuratedReferenceAdapter{NewModelsDevAdapter(), NewBaseLLMAdapter()} {
-		require.NoError(t, adapter.validateEndpoint())
+		require.NoError(t, upstreamprice.ValidatePinnedEndpoint(adapter.key, adapter.endpoint, adapter.host, adapter.allowTestEndpoint))
 
 		for _, hostile := range []string{
 			"https://" + adapter.host + ".evil.example/api.json",
 			"http://" + adapter.host + "/api.json",
 			"https://evil.example/api.json",
 		} {
-			forged := *adapter
-			forged.endpoint = hostile
-			require.Error(t, forged.validateEndpoint(), hostile)
+			require.Error(t, upstreamprice.ValidatePinnedEndpoint(adapter.key, hostile, adapter.host, adapter.allowTestEndpoint), hostile)
 		}
 	}
 }

@@ -95,6 +95,8 @@ export function PriceSourceMutateDrawer(props: Props) {
 
   // The adapter contract is registry state, not user data: it changes only on
   // a backend release, so one cached fetch serves every open of the drawer.
+  // The drawer stays mounted while closed, so the fetch waits for the first
+  // open instead of loading a registry the closed drawer never shows.
   const adaptersQuery = useQuery({
     queryKey: priceCatalogQueryKeys.adapters,
     queryFn: async () => {
@@ -104,6 +106,7 @@ export function PriceSourceMutateDrawer(props: Props) {
       }
       return res.data ?? []
     },
+    enabled: props.open,
     retry: false,
     staleTime: 30 * 60 * 1000,
   })
@@ -116,23 +119,29 @@ export function PriceSourceMutateDrawer(props: Props) {
     defaultValues: PRICE_SOURCE_FORM_DEFAULTS,
   })
 
+  // Opening the drawer establishes the baseline the admin edits from: the
+  // stored source, or a blank new one. Only opening does this, so a later
+  // reset can never discard what the admin has already typed.
   useEffect(() => {
     if (!props.open) return
-    if (props.source) {
-      form.reset(priceSourceToFormValues(props.source))
-      return
-    }
-    const first = adapters[0]
     form.reset(
-      first
-        ? {
-            ...PRICE_SOURCE_FORM_DEFAULTS,
-            adapter_key: first.key,
-            role: first.allowed_roles[0] ?? '',
-            scope: first.allowed_scopes[0] ?? '',
-          }
+      props.source
+        ? priceSourceToFormValues(props.source)
         : PRICE_SOURCE_FORM_DEFAULTS
     )
+  }, [form, props.open, props.source])
+
+  // The registry answers after the drawer is interactive, so it only fills the
+  // contract a new source has not got yet: the adapter and the role and scope
+  // that adapter admits. A stored source already carries its own, and an
+  // adapter the admin has since chosen stands.
+  useEffect(() => {
+    if (!props.open || props.source) return
+    const first = adapters[0]
+    if (!first || form.getValues('adapter_key') !== '') return
+    form.setValue('adapter_key', first.key)
+    form.setValue('role', first.allowed_roles[0] ?? '')
+    form.setValue('scope', first.allowed_scopes[0] ?? '')
   }, [adapters, form, props.open, props.source])
 
   const adapterKey = form.watch('adapter_key')
@@ -143,6 +152,26 @@ export function PriceSourceMutateDrawer(props: Props) {
   const adapter = findPriceAdapter(adapters, adapterKey)
   const roleOptions = adapter?.allowed_roles ?? []
   const scopeOptions = adapter?.allowed_scopes ?? []
+
+  // Role and scope are the same control over two option lists the adapter
+  // declares, so the drawer describes each list once and renders both the same
+  // way. A list of one is not a choice, so only a longer one gets a field.
+  const adapterContractFields = [
+    {
+      name: 'role',
+      label: t('Role'),
+      placeholder: t('Select a role'),
+      options: roleOptions,
+      labelKeys: ROLE_LABEL_KEYS,
+    },
+    {
+      name: 'scope',
+      label: t('Scope'),
+      placeholder: t('Select a scope'),
+      options: scopeOptions,
+      labelKeys: SCOPE_LABEL_KEYS,
+    },
+  ] as const
 
   const saveMutation = useMutation({
     mutationFn: async (values: PriceSourceFormValues) => {
@@ -320,75 +349,47 @@ export function PriceSourceMutateDrawer(props: Props) {
                           'This adapter admits more than one combination. Only the values listed here are accepted.'
                         )}
                       </p>
-                      {roleOptions.length > 1 && (
-                        <FormField
-                          control={form.control}
-                          name='role'
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>{t('Role')}</FormLabel>
-                              <Select
-                                items={roleOptions.map((value) => ({
-                                  value,
-                                  label: t(ROLE_LABEL_KEYS[value] ?? value),
-                                }))}
-                                value={field.value}
-                                onValueChange={field.onChange}
-                              >
-                                <FormControl>
-                                  <SelectTrigger>
-                                    <SelectValue
-                                      placeholder={t('Select a role')}
-                                    />
-                                  </SelectTrigger>
-                                </FormControl>
-                                <SelectContent alignItemWithTrigger={false}>
-                                  {roleOptions.map((value) => (
-                                    <SelectItem key={value} value={value}>
-                                      {t(ROLE_LABEL_KEYS[value] ?? value)}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                      )}
-                      {scopeOptions.length > 1 && (
-                        <FormField
-                          control={form.control}
-                          name='scope'
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>{t('Scope')}</FormLabel>
-                              <Select
-                                items={scopeOptions.map((value) => ({
-                                  value,
-                                  label: t(SCOPE_LABEL_KEYS[value] ?? value),
-                                }))}
-                                value={field.value}
-                                onValueChange={field.onChange}
-                              >
-                                <FormControl>
-                                  <SelectTrigger>
-                                    <SelectValue
-                                      placeholder={t('Select a scope')}
-                                    />
-                                  </SelectTrigger>
-                                </FormControl>
-                                <SelectContent alignItemWithTrigger={false}>
-                                  {scopeOptions.map((value) => (
-                                    <SelectItem key={value} value={value}>
-                                      {t(SCOPE_LABEL_KEYS[value] ?? value)}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
+                      {adapterContractFields.map((definition) =>
+                        definition.options.length <= 1 ? null : (
+                          <FormField
+                            key={definition.name}
+                            control={form.control}
+                            name={definition.name}
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>{definition.label}</FormLabel>
+                                <Select
+                                  items={definition.options.map((value) => ({
+                                    value,
+                                    label: t(
+                                      definition.labelKeys[value] ?? value
+                                    ),
+                                  }))}
+                                  value={field.value}
+                                  onValueChange={field.onChange}
+                                >
+                                  <FormControl>
+                                    <SelectTrigger>
+                                      <SelectValue
+                                        placeholder={definition.placeholder}
+                                      />
+                                    </SelectTrigger>
+                                  </FormControl>
+                                  <SelectContent alignItemWithTrigger={false}>
+                                    {definition.options.map((value) => (
+                                      <SelectItem key={value} value={value}>
+                                        {t(
+                                          definition.labelKeys[value] ?? value
+                                        )}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        )
                       )}
                     </>
                   )}
