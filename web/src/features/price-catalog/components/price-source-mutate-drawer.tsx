@@ -545,12 +545,12 @@ export function PriceSourceMutateDrawer(props: Props) {
                         {...field}
                         rows={6}
                         className='font-mono text-xs'
-                        placeholder='{"model_mappings":{},"coverage_drop_threshold":0.2,"stale_threshold_seconds":604800}'
+                        placeholder='{"model_mappings":{},"coverage_drop_threshold":0.2,"stale_threshold_seconds":604800,"price_jump_threshold":0.5}'
                       />
                     </FormControl>
                     <FormDescription>
                       {t(
-                        'Optional. Only model_mappings, coverage_drop_threshold and stale_threshold_seconds are accepted; credentials and endpoints are rejected.'
+                        'Optional. Only model_mappings, coverage_drop_threshold, stale_threshold_seconds and price_jump_threshold are accepted; credentials and endpoints are rejected.'
                       )}
                     </FormDescription>
                     <FormMessage />

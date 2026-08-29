@@ -5400,7 +5400,7 @@
     "Not projectable": "Không thể chiếu",
     "Notes": "Ghi chú",
     "Observed upstream prices. Nothing here changes what users are charged.": "Giá thượng nguồn đã quan sát. Không thao tác nào ở đây thay đổi khoản người dùng bị tính phí.",
-    "Optional. Only model_mappings, coverage_drop_threshold and stale_threshold_seconds are accepted; credentials and endpoints are rejected.": "Tùy chọn. Chỉ chấp nhận model_mappings, coverage_drop_threshold và stale_threshold_seconds; thông tin xác thực và điểm cuối sẽ bị từ chối.",
+    "Optional. Only model_mappings, coverage_drop_threshold, stale_threshold_seconds and price_jump_threshold are accepted; credentials and endpoints are rejected.": "Tùy chọn. Chỉ chấp nhận model_mappings, coverage_drop_threshold, stale_threshold_seconds và price_jump_threshold; thông tin xác thực và endpoint sẽ bị từ chối.",
     "Other ratios": "Các hệ số khác",
     "Per-call price": "Giá theo lượt gọi",
     "Per-request billing ratios": "Hệ số tính phí theo yêu cầu",

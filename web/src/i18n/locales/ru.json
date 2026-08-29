@@ -5400,7 +5400,7 @@
     "Not projectable": "Невозможно спроецировать",
     "Notes": "Примечания",
     "Observed upstream prices. Nothing here changes what users are charged.": "Наблюдаемые цены поставщиков. Ничто здесь не меняет списания с пользователей.",
-    "Optional. Only model_mappings, coverage_drop_threshold and stale_threshold_seconds are accepted; credentials and endpoints are rejected.": "Необязательно. Принимаются только model_mappings, coverage_drop_threshold и stale_threshold_seconds; учётные данные и конечные точки отклоняются.",
+    "Optional. Only model_mappings, coverage_drop_threshold, stale_threshold_seconds and price_jump_threshold are accepted; credentials and endpoints are rejected.": "Необязательно. Принимаются только model_mappings, coverage_drop_threshold, stale_threshold_seconds и price_jump_threshold; учётные данные и endpoint отклоняются.",
     "Other ratios": "Прочие коэффициенты",
     "Per-call price": "Цена за вызов",
     "Per-request billing ratios": "Коэффициенты тарификации на уровне запроса",

@@ -5400,7 +5400,7 @@
     "Not projectable": "Non projetable",
     "Notes": "Remarques",
     "Observed upstream prices. Nothing here changes what users are charged.": "Prix amont observés. Rien ici ne modifie ce qui est facturé aux utilisateurs.",
-    "Optional. Only model_mappings, coverage_drop_threshold and stale_threshold_seconds are accepted; credentials and endpoints are rejected.": "Facultatif. Seuls model_mappings, coverage_drop_threshold et stale_threshold_seconds sont acceptés ; les identifiants et points de terminaison sont refusés.",
+    "Optional. Only model_mappings, coverage_drop_threshold, stale_threshold_seconds and price_jump_threshold are accepted; credentials and endpoints are rejected.": "Facultatif. Seuls model_mappings, coverage_drop_threshold, stale_threshold_seconds et price_jump_threshold sont acceptés ; les identifiants et les endpoints sont rejetés.",
     "Other ratios": "Autres ratios",
     "Per-call price": "Prix par appel",
     "Per-request billing ratios": "Ratios de facturation par requête",

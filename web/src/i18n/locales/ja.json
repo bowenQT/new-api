@@ -5400,7 +5400,7 @@
     "Not projectable": "投影不可",
     "Notes": "備考",
     "Observed upstream prices. Nothing here changes what users are charged.": "観測した上流価格です。ここでの操作がユーザーの課金を変えることはありません。",
-    "Optional. Only model_mappings, coverage_drop_threshold and stale_threshold_seconds are accepted; credentials and endpoints are rejected.": "任意。model_mappings、coverage_drop_threshold、stale_threshold_seconds のみ受け付けます。資格情報やエンドポイントは拒否されます。",
+    "Optional. Only model_mappings, coverage_drop_threshold, stale_threshold_seconds and price_jump_threshold are accepted; credentials and endpoints are rejected.": "任意。model_mappings、coverage_drop_threshold、stale_threshold_seconds、price_jump_threshold のみ受け付けます。認証情報とエンドポイントは拒否されます。",
     "Other ratios": "その他の倍率",
     "Per-call price": "回数課金",
     "Per-request billing ratios": "リクエスト単位の課金倍率",

@@ -5400,7 +5400,7 @@
     "Not projectable": "无法投影",
     "Notes": "备注",
     "Observed upstream prices. Nothing here changes what users are charged.": "这里是观察到的上游价格，任何操作都不会改变用户的实际扣费。",
-    "Optional. Only model_mappings, coverage_drop_threshold and stale_threshold_seconds are accepted; credentials and endpoints are rejected.": "可选。只接受 model_mappings、coverage_drop_threshold 与 stale_threshold_seconds；凭证与端点会被拒绝。",
+    "Optional. Only model_mappings, coverage_drop_threshold, stale_threshold_seconds and price_jump_threshold are accepted; credentials and endpoints are rejected.": "可选。只接受 model_mappings、coverage_drop_threshold、stale_threshold_seconds 与 price_jump_threshold；凭证与端点会被拒绝。",
     "Other ratios": "其他倍率",
     "Per-call price": "按次计价",
     "Per-request billing ratios": "请求级计费倍率",
