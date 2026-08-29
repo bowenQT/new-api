@@ -215,7 +215,21 @@ type EndpointReporter interface {
 }
 ```
 
-`ListAdapters` 用类型断言取值，未实现者的 `endpoint` 为空串。后续新增的可选能力（例如条件请求）沿用同一写法。
+`ListAdapters` 用类型断言取值，未实现者的 `endpoint` 为空串。后续新增的可选能力沿用同一写法，例如条件请求：
+
+```go
+// 上游支持 HTTP 条件请求的适配器实现；ifNoneMatch 是基线 run 的 source_revision。
+// 上游回 304 时返回空 observations 与 FetchMeta.NotModified，不读、不解析 body。
+type ConditionalFetcher interface {
+    FetchConditional(ctx context.Context, source SourceConfig, ifNoneMatch string) ([]Observation, FetchMeta, error)
+}
+```
+
+`Fetch` 签名不变；同步引擎用类型断言选择路径，未实现该接口的适配器行为完全不变。
+`FetchMeta.NotModified` 只对引擎自己发出的条件请求生效，且只允许由真实 304 应答置位。
+
+`ifNoneMatch` 由适配器负责按 HTTP 语义使用：不是合法 entity-tag 的 revision（例如被列宽截断的值）必须
+退化为无条件请求，而不是把畸形头发到线上。
 
 `Observation` 是供应商无关的中间对象：
 
@@ -292,6 +306,9 @@ Vercel adapter 必须：
    归一化范围限定为 `input`/`output`/`cache_read`/`cache_write` 的 flat 价格：模型 `cost` 含
    `tiers` 或 `context_over_200k` 时整条记为 unsupported（只记基础档会低报长上下文价格），
    其余未支持维度进 metadata warning，不猜测。价格按源 JSON 原文走十进制校验，指数形式一律拒绝。
+   条件请求（2026-08-29 实测）：两个端点都返回强 ETag 且遵守 `If-None-Match`，内容未变时回 304。
+   因此这两个适配器实现可选接口 `ConditionalFetcher`（见 §6.1 与 §8.1 的 304 语义）；上游若不再
+   返回 ETag，基线 `source_revision` 为空，自动退化为全量抓取，行为与接入前一致。
 4. 人工合同价：`supplier_cost + contract`，必须有独立权限和审计。不进首版，后续独立立项。
 
 ## 7. 数据模型
@@ -352,7 +369,7 @@ Vercel adapter 必须：
 | `last_seen_at` | bigint | 最近一次观察到该内容的时间；幂等命中时更新（观察证据，非当前价权威） |
 | `last_seen_run_id` | int | 最近一次观察到该内容的 run；幂等命中时更新 |
 | `fingerprint` | char(64) | 规范化内容 SHA-256 |
-| `fingerprint_version` | varchar(16) | 指纹算法与 canonical payload 版本；进入 canonical payload |
+| `fingerprint_version` | varchar(16) | 指纹算法与 canonical payload 版本；进入 canonical payload。归一化语义（canonical payload 布局、映射规则、表达式生成）一旦改变必须 bump，这是 §8.1 条件请求门禁的前提 |
 | `metadata` | text | 受控、非秘密 JSON |
 | `created_time` | bigint | 入库时间 |
 
@@ -383,7 +400,7 @@ Vercel adapter 必须：
 | `response_bytes` | bigint | 响应大小（解压后） |
 | `source_config_revision` | bigint | 执行时的 PriceSource `config_revision` |
 | `source_config_digest` | varchar(64) | 非秘密配置摘要 |
-| `source_revision` | varchar(128) | ETag、版本号或来源更新时间（来源级抓取证据） |
+| `source_revision` | varchar(128) | ETag、版本号或来源更新时间（来源级抓取证据）。同时是下次同步的条件请求验证器：从 `last_success_run` 回读作 `If-None-Match`（§8.1）。它只落在 run 上，不进 `settings`，因此不污染 `source_config_digest` |
 | `discovered_count` | int | 发现模型数 |
 | `valid_count` | int | 有效观察值数 |
 | `unsupported_count` | int | 无法归一化数 |
@@ -460,6 +477,29 @@ preview DTO 摘要（新增/变化/rejected/unsupported/missing 清单与覆盖�
 与 Commit 落在不同实例时，校验会失败并要求重新 Preview；首版接受此限制。Commit 无论如何都重新抓
 取并归一化，安全性不依赖该 key。
 
+条件请求与 304 回放（Phase 2 实施口径）：
+
+- 适配器实现 `ConditionalFetcher`（§6.1）时，抓取带上基线 run 的 `source_revision` 作 `If-None-Match`。
+  上游回 304 表示表示（representation）未变，不下载也不解析 body。
+- 304 落一条正常的 run，条目从基线 run **逐条复制**：valid 条目带回基线快照，走同一条 CAS 提交事务与
+  同一套指纹幂等，因此命中同一批快照 id、只推进 `last_seen_at` / `last_seen_run_id`；unsupported 与
+  rejected 原样复制；基线的 missing 条目仍记为 missing。run 记 `http_status = 304`、
+  `response_bytes = 0`、`discovered_count` 沿用基线。整个路径不做任何归一化。
+- run 状态按复制后的条目清单推导，与全量路径同一套 §8.2 规则：partial 基线回放仍是 partial，
+  绝不一律记 succeeded。valid 数与基线相同，因此覆盖率门禁恒为不触发。
+- **发条件请求的门禁（两个条件都满足才发，否则强制全量）**：
+  1. 当前来源的实质配置 digest 与基线 run 的 `source_config_digest` 相同。配置移动（映射、role、
+     scope、渠道、适配器）后回放会把旧映射下算出的快照在新配置下重新确认为当前成本，并错误清除
+     `source_config_changed` 告警。
+  2. 基线全部 valid 快照的 `fingerprint_version` 等于当前实现的版本。版本不同意味着今天的 canonical
+     payload 与基线不同，全量抓同样字节也会产生新快照；回放会让旧版本快照继续当当前价。
+     因此归一化语义变化必须 bump `FingerprintVersion`（§7.2），门禁才成立。
+  另有两个退化条件：基线 `source_revision` 为空（上游不给验证器），或基线快照行读不齐。任一不满足
+  都走全量，行为与未接入条件请求时逐字节一致。
+- preview 与 commit 之间上游变化没有特例：两次抓取拿到不同表示时，重算出的 preview digest 与
+  token 内的不一致，commit 按既有路径拒绝并要求重新 Preview。preview 200 / commit 304 与
+  preview 304 / commit 200 都走这条路径，不假设任何一个方向不可能发生。
+
 ### 8.2 部分失败
 
 - 单模型格式异常：隔离该模型（run item 记为 `unsupported` 或 `rejected`，附 `warning_code`），其他有效观察值可以保存；run 状态记为 `partial`。被隔离的模型不得被判为 missing。
@@ -473,6 +513,8 @@ preview DTO 摘要（新增/变化/rejected/unsupported/missing 清单与覆盖�
 
 - 当前价与 stale 判定基于 run 模型：当前价是 `last_success_run` 中 `status = valid` 的 run item 指向的快照（见 §7.3）；`last_seen_at` 仅作观察证据，不再是 current 判定的权威。
 - stale 判定基于 `last_success_run` 的完成时间：距今超过阈值即 stale。阈值默认为同步周期的 2 倍；手工来源使用显式阈值。
+- 304 回放 run 与全量 run 在这里没有区别：它同样推进 `last_success_run_id`，stale 基准随之推进。
+  「上游被问过且回答内容未变」是真实的新鲜度证据，与全量抓到相同内容后命中指纹幂等等价。
 - stale 价格仍可展示，但不得被标记为“当前已确认成本”。
 - UI 必须同时显示 `last_success_run` 完成时间、`last_seen_at`、`fetched_at`、`effective_at` 和来源名称。
 
@@ -512,6 +554,7 @@ Phase 2 实施口径：
 - 「计入连续失败告警」的实现方式是：调度路径上每一次失败都落一条 run 行。plan 前失败落一条不带任何 run item 的轻量 `failed` run，它与退避时间戳在同一个事务里写入。这样 `source_consecutive_failures` 告警（按 failed run 行计数）不会漏掉从未进入 adapter 的失败；此前这类失败只更新 `last_error_at`，无论重复多少次都永不告警。轻量 run 不写 `source_config_digest`，只有成功 run 才参与 §9.2 的 digest 比较。
 - CAS 冲突是唯一既不退避也不落 run 的调度失败：它表示管理员在抓取途中改了来源配置，被拒的是**旧配置**下算出的提交，新配置本身没有失败。给新配置打退避时间戳会把它的首次真正同步推迟一整个间隔，计入连续失败则是把冲突算到新配置头上。下次唤醒会在当前配置下重新 plan 且 CAS 能通过，因此不会形成循环。该来源仍计入本次任务的 `Failed`，任务照常收尾为失败。
 - orphan 检查返回数据库错误不等于「渠道确认已删除」：来源既没有执行也没有被安全跳过，因此按普通失败处理（退避 + 落 run + 任务失败），只有确认删除的真 orphan 才是 `Skipped`。
+- 304 不是失败，不进上表：它按回放后的 run 状态（`succeeded` / `partial`）参与调度结果分类，不写 `last_error_at`、不计连续失败。重试策略也不变，可重试状态码集合不含 304。
 
 ## 9. 销售价与成本的关系
 
@@ -1004,3 +1047,12 @@ rev5.1（2026-08-29）：Phase 2 后端评审修复。
 - §7.3：run 增加 `coverage_drop_exceeded` 可空布尔列。
 - §13：`coverage_drop` 判定基准改为最近一次尝试，覆盖被门禁拒绝的 run；告警日志改由手工与调度共用的写后钩子触发，成本倒挂按本次写入的模型集合评估；告警补结构化 `params`；已实现告警计为五类（补上此前未列出的 `source_config_changed`）。
 - §10.3：usage vector 默认值明确为整体缺省，请求给出 `usage` 时未列出的维度按 0 计算；compare 的来源价格补 `unsupported_dimensions`。
+
+rev5.2（2026-08-29）：curated_reference 条件请求（issue #9）。
+
+- §6.1：新增可选能力接口 `ConditionalFetcher`（`Fetch` 签名不变，引擎用类型断言选路），`FetchMeta.NotModified` 只对引擎发出的条件请求生效；非法 entity-tag 的 revision 由适配器退化为无条件请求。
+- §6.3：models.dev 与 basellm 端点均实测返回强 ETag 并遵守 `If-None-Match`（2026-08-29），两者共用同一实现；上游停发 ETag 时自动退化全量。
+- §8.1：补条件请求与 304 回放语义——从基线 run 逐条复制条目、走同一条 CAS 提交与指纹幂等、run 状态按复制后的清单按 §8.2 推导（partial 基线仍是 partial）；条件请求门禁要求配置 digest 与基线一致**且**基线全部 valid 快照的 `fingerprint_version` 等于当前版本；preview / commit 表示分歧统一按 digest 不匹配要求重新 Preview，不假设任何方向不可能。
+- §7.2：写明归一化语义变化必须 bump `fingerprint_version`，这是上述门禁的前提。
+- §7.3：`source_revision` 补充其作为下次条件请求验证器的用途，以及「只落 run、不进 settings、不污染 digest」。
+- §8.3、§8.4：304 与全量 run 同样推进 `last_success_run_id` 与 stale 基准；304 是成功路径，不进调度失败语义表。
