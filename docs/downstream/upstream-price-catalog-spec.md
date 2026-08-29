@@ -573,13 +573,16 @@ Phase 3 实施时不能照搬当前前端逐个 option 顺序写入的非原子�
 ```text
 GET    /api/upstream-price-sources
 GET    /api/upstream-price-sources/adapters
+GET    /api/upstream-price-sources/alerts
 POST   /api/upstream-price-sources
 PUT    /api/upstream-price-sources/:id
 ```
 
-四个接口均为 RootAuth。首版不提供硬删除；使用 `enabled=false`。
+五个接口均为 RootAuth。首版不提供硬删除；使用 `enabled=false`。
 
 `GET /api/upstream-price-sources/adapters` 返回注册表中每个 adapter 的 `key`、`allowed_roles`、`allowed_scopes`、`requires_channel` 与固定公开 `endpoint`，供管理界面按注册表构建来源表单，避免前端复制一份 adapter 清单后与后端漂移。该响应只含非敏感信息，绝不包含凭证（§12）。
+
+`GET /api/upstream-price-sources/alerts` 返回 `{generated_at, alerts}`：`alerts` 是 §13 前四类来源级告警的扁平列表，与 `GET /api/upstream-prices/current` 的 `alerts` 字段出自同一次 `EvaluateSourceAlerts` 评估，逐项相同。它不含成本倒挂（`cost_inversion`）——倒挂是 canonical 模型维度的判定，不挂在来源上，由 compare 承载（§13）。来源列表页用它渲染告警，因而无需为告警拉取整份目录投影。
 
 `GET /api/upstream-price-sources` 的每条记录另带上次成功 run 的聚合：`last_success_finished_at`、`coverage_count`（valid 模型数）、`missing_count` 与按 §8.3 阈值判定的 `stale`，使列表页无需为每个来源再查一次目录。
 
@@ -684,7 +687,7 @@ POST /api/upstream-prices/sale-candidate
 Phase 2 实施口径（§21 Q6 裁决：仅后台展示 + 日志，不接通知渠道）：
 
 - 已实现五类：来源连续 3 次同步失败（`source_consecutive_failures`）、成本来源超 stale 阈值（`source_stale`）、模型覆盖率下降超门禁（`coverage_drop`）、来源配置在最近一次成功 run 之后被改（`source_config_changed`）、默认分组成本倒挂（`cost_inversion`）。
-- 前四类按 run 历史在读取时派生，随 `GET /api/upstream-prices/current` 与 `POST /api/upstream-prices/compare` 返回；倒挂由 compare 在同一 usage vector 下计算。
+- 前四类按 run 历史在读取时派生，随 `GET /api/upstream-price-sources/alerts`、`GET /api/upstream-prices/current` 与 `POST /api/upstream-prices/compare` 返回；倒挂由 compare 在同一 usage vector 下计算，因此不出现在来源级告警端点。
 - `coverage_drop` 的判定基准是**最近一次尝试**，不是最近两次成功 run：覆盖率暴跌会被门禁拒绝，被拒的 run 记为 `failed` 且不推进 baseline，只比较成功 run 会让最需要告警的场景反而无告警。判定依据是 run 上的显式列 `coverage_drop_exceeded`（可空布尔，`nil` 表示该列存在前写入的旧行，按「不是门禁拒绝」处理），不解析 `error_summary` 文本，也不从计数反推。最近一次尝试是门禁拒绝时，与上一次成功 run 比较并置 `params.gate_refused=true`；否则退回最近两次成功 run 的比较。
 - 写日志的位置是改变目录状态的路径（写入 run 之后），不是查询路径，避免日志随后台 UI 流量放大。该位置是手工与调度**共用**的写后钩子：手工 commit、调度 commit、被门禁拒绝的 run、抓取失败的 run 和调度 plan 前失败的轻量 run 都会触发一次告警评估与日志。定时同步默认关闭，把告警日志只挂在调度路径上等于默认永不落日志。
 - 成本倒挂日志按本次写入实际置为 current 的 canonical 模型集合评估（超过单次请求上限时分批），不再对全目录做一次全量比较：手工 commit 是交互式请求，而未被本次同步触及的模型的成本不可能因这次同步而改变。
