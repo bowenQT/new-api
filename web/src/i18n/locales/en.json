@@ -5400,7 +5400,7 @@
     "Not projectable": "Not projectable",
     "Notes": "Notes",
     "Observed upstream prices. Nothing here changes what users are charged.": "Observed upstream prices. Nothing here changes what users are charged.",
-    "Optional. Only model_mappings, coverage_drop_threshold and stale_threshold_seconds are accepted; credentials and endpoints are rejected.": "Optional. Only model_mappings, coverage_drop_threshold and stale_threshold_seconds are accepted; credentials and endpoints are rejected.",
+    "Optional. Only model_mappings, coverage_drop_threshold, stale_threshold_seconds and price_jump_threshold are accepted; credentials and endpoints are rejected.": "Optional. Only model_mappings, coverage_drop_threshold, stale_threshold_seconds and price_jump_threshold are accepted; credentials and endpoints are rejected.",
     "Other ratios": "Other ratios",
     "Per-call price": "Per-call price",
     "Per-request billing ratios": "Per-request billing ratios",
@@ -5495,6 +5495,16 @@
     "The coverage gate refused run #{{runId}}. Valid model coverage would have fallen from {{previous}} to {{current}} models, past the {{gate}} drop gate, so nothing was written.": "The coverage gate refused run #{{runId}}. Valid model coverage would have fallen from {{previous}} to {{current}} models, past the {{gate}} drop gate, so nothing was written.",
     "Unnormalized source pricing dimensions: {{dimensions}}": "Unnormalized source pricing dimensions: {{dimensions}}",
     "Source is disabled": "Source is disabled",
-    "This source is disabled. Preview stays available for diagnosis, but the server refuses to commit a sync until the source is enabled again.": "This source is disabled. Preview stays available for diagnosis, but the server refuses to commit a sync until the source is enabled again."
+    "This source is disabled. Preview stays available for diagnosis, but the server refuses to commit a sync until the source is enabled again.": "This source is disabled. Preview stays available for diagnosis, but the server refuses to commit a sync until the source is enabled again.",
+    "Cache read": "Cache read",
+    "Per call": "Per call",
+    "Unverified expression": "Unverified expression",
+    "Upstream price changed sharply": "Upstream price changed sharply",
+    "Sharp price change, needs review": "Sharp price change, needs review",
+    "The {{dimension}} price of {{model}} moved from {{previous}} to {{current}} ({{rate}}) at {{context}}.": "The {{dimension}} price of {{model}} moved from {{previous}} to {{current}} ({{rate}}) at {{context}}.",
+    "The {{dimension}} price of {{model}} moved from zero to {{current}} at {{context}}.": "The {{dimension}} price of {{model}} moved from zero to {{current}} at {{context}}.",
+    "The price of {{model}} changed in a way this check could not measure. Review it manually.": "The price of {{model}} changed in a way this check could not measure. Review it manually.",
+    "{{count}} further price change(s) were recorded but are not listed.": "{{count}} further price change(s) were recorded but are not listed.",
+    "This sync would record {{count}} price change(s) past the configured threshold. The commit is not blocked; review the changed models afterwards.": "This sync would record {{count}} price change(s) past the configured threshold. The commit is not blocked; review the changed models afterwards."
   }
 }

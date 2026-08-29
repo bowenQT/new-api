@@ -94,6 +94,30 @@ export const ALERT_SOURCE_STALE = 'source_stale'
 export const ALERT_COVERAGE_DROP = 'coverage_drop'
 export const ALERT_COST_INVERSION = 'cost_inversion'
 
+/**
+ * `upstreamprice.AlertPriceJump`. One alert per price dimension the last
+ * successful run measured moving past the source's threshold (spec §13). It
+ * never means a sync was refused; it means the committed prices need a look.
+ */
+export const ALERT_PRICE_JUMP = 'price_jump'
+
+/**
+ * `upstreamprice.PriceJumpDimensionExprUnverified`. The fail-closed dimension:
+ * the price changed in a way the check could neither measure nor prove absent,
+ * so it carries no rate and must not be rendered as a threshold breach.
+ */
+export const PRICE_JUMP_DIMENSION_EXPR_UNVERIFIED = 'expr_unverified'
+
+/** i18n source keys for the price dimensions a movement is reported along. */
+export const PRICE_JUMP_DIMENSION_LABEL_KEYS: Record<string, string> = {
+  input: 'Input',
+  output: 'Output',
+  cache_read: 'Cache read',
+  cache_write: 'Cache write',
+  per_call: 'Per call',
+  [PRICE_JUMP_DIMENSION_EXPR_UNVERIFIED]: 'Unverified expression',
+}
+
 /** Catalog health alert codes (`service/upstreamprice/alerts.go`, spec §13). */
 export const ALERT_LABEL_KEYS: Record<string, string> = {
   [ALERT_SOURCE_CONSECUTIVE_FAILURES]: 'Source failed repeatedly',
@@ -101,6 +125,7 @@ export const ALERT_LABEL_KEYS: Record<string, string> = {
   [ALERT_COVERAGE_DROP]: 'Model coverage dropped',
   [ALERT_COST_INVERSION]: 'Cost exceeds the projected sale price',
   [ALERT_SOURCE_CONFIG_CHANGED]: 'Source configuration changed',
+  [ALERT_PRICE_JUMP]: 'Upstream price changed sharply',
 }
 
 /**

@@ -128,6 +128,14 @@ type PriceSyncRun struct {
 	// failing to scan, and no boolean default is declared, so AutoMigrate
 	// cannot churn on MySQL/PostgreSQL default normalization.
 	CoverageDropExceeded *bool `json:"coverage_drop_exceeded,omitempty"`
+	// PriceJumpSummary holds the bounded JSON evidence of the price movements
+	// this run observed against its baseline run (spec §7.3, §13). An empty
+	// string means the run evaluated no movement — a run written before the
+	// column existed, a run with no changed fingerprint, or a run whose probes
+	// all stayed under the source threshold — and never means "not known", so
+	// alerting reads it directly. It is a plain text column with no GORM
+	// default, so AutoMigrate cannot churn on it.
+	PriceJumpSummary string `json:"price_jump_summary,omitempty" gorm:"type:text"`
 }
 
 // PriceSyncRunItem is the per-model detail of one run (spec §7.3). The

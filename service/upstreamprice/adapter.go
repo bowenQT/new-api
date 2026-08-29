@@ -69,6 +69,11 @@ type SourceSettings struct {
 	// StaleThresholdSeconds overrides the staleness threshold for manual
 	// sources (spec §8.3).
 	StaleThresholdSeconds *int64 `json:"stale_threshold_seconds,omitempty"`
+	// PriceJumpThreshold overrides the per-source price-movement alert
+	// threshold, expressed as a change rate in (0, 1000] (spec §13). Unlike a
+	// coverage drop, a price change rate is not a fraction of a whole: a ten
+	// fold increase is 9.0, so the range deliberately extends past 1.
+	PriceJumpThreshold *float64 `json:"price_jump_threshold,omitempty"`
 }
 
 // SourceConfig is the adapter-facing view of a PriceSource.
@@ -91,6 +96,7 @@ var allowedSourceSettingsFields = map[string]bool{
 	"model_mappings":          true,
 	"coverage_drop_threshold": true,
 	"stale_threshold_seconds": true,
+	"price_jump_threshold":    true,
 }
 
 // ParseSourceSettings strictly parses a settings JSON string: unknown fields

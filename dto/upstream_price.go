@@ -134,22 +134,26 @@ type UpstreamPricePreviewItem struct {
 // never persists anything and returns the short-lived preview token commit
 // requires.
 type UpstreamPricePreviewResponse struct {
-	SourceId             int                        `json:"source_id"`
-	BaseRunId            *int                       `json:"base_run_id"`
-	ProjectedRunStatus   string                     `json:"projected_run_status"`
-	DiscoveredCount      int                        `json:"discovered_count"`
-	ValidCount           int                        `json:"valid_count"`
-	UnsupportedCount     int                        `json:"unsupported_count"`
-	RejectedCount        int                        `json:"rejected_count"`
-	MissingCount         int                        `json:"missing_count"`
-	NewCount             int                        `json:"new_count"`
-	ChangedCount         int                        `json:"changed_count"`
-	UnchangedCount       int                        `json:"unchanged_count"`
-	CoverageDropExceeded bool                       `json:"coverage_drop_exceeded"`
-	Items                []UpstreamPricePreviewItem `json:"items"`
-	Missing              []string                   `json:"missing"`
-	PreviewToken         string                     `json:"preview_token"`
-	ExpiresAt            int64                      `json:"expires_at"`
+	SourceId             int    `json:"source_id"`
+	BaseRunId            *int   `json:"base_run_id"`
+	ProjectedRunStatus   string `json:"projected_run_status"`
+	DiscoveredCount      int    `json:"discovered_count"`
+	ValidCount           int    `json:"valid_count"`
+	UnsupportedCount     int    `json:"unsupported_count"`
+	RejectedCount        int    `json:"rejected_count"`
+	MissingCount         int    `json:"missing_count"`
+	NewCount             int    `json:"new_count"`
+	ChangedCount         int    `json:"changed_count"`
+	UnchangedCount       int    `json:"unchanged_count"`
+	CoverageDropExceeded bool   `json:"coverage_drop_exceeded"`
+	// PriceJumpCount is how many price movements past the source threshold this
+	// plan measured against the baseline run (spec §13). It never refuses a
+	// commit; it tells the admin what committing would record.
+	PriceJumpCount int                        `json:"price_jump_count"`
+	Items          []UpstreamPricePreviewItem `json:"items"`
+	Missing        []string                   `json:"missing"`
+	PreviewToken   string                     `json:"preview_token"`
+	ExpiresAt      int64                      `json:"expires_at"`
 }
 
 // UpstreamPriceSyncResponse summarizes one committed (or gate-refused) run.
@@ -164,6 +168,10 @@ type UpstreamPriceSyncResponse struct {
 	NewSnapshotCount   int    `json:"new_snapshot_count"`
 	IdempotentHitCount int    `json:"idempotent_hit_count"`
 	ErrorSummary       string `json:"error_summary,omitempty"`
+	// PriceJumpCount is how many price movements past the source threshold this
+	// run recorded (spec §13). A non-zero count marks the run for review; it
+	// never means the commit was refused.
+	PriceJumpCount int `json:"price_jump_count"`
 }
 
 // UpstreamCurrentPriceEntry is one row of the current price catalog with its
@@ -234,6 +242,10 @@ type UpstreamPriceSourceAlertsResponse struct {
 //	coverage_drop:               run_id, previous_valid_count, valid_count,
 //	                             drop_threshold, gate_refused
 //	cost_inversion:              group
+//	price_jump:                  run_id, source_model_name, dimension,
+//	                             probe_context, previous_usd, current_usd,
+//	                             change_rate, from_zero, jump_threshold,
+//	                             jump_count, reported_count
 type UpstreamPriceAlertParams struct {
 	FailureCount       *int     `json:"failure_count,omitempty"`
 	RunId              *int     `json:"run_id,omitempty"`
@@ -247,6 +259,28 @@ type UpstreamPriceAlertParams struct {
 	// runs that both committed.
 	GateRefused *bool  `json:"gate_refused,omitempty"`
 	Group       string `json:"group,omitempty"`
+	// SourceModelName names the upstream model whose price moved. It is sent
+	// alongside CanonicalModelName because several source models can map to one
+	// canonical model, so the canonical name alone does not identify which
+	// upstream entry changed.
+	SourceModelName string `json:"source_model_name,omitempty"`
+	// Dimension is the price dimension that moved (input / output / cache_read
+	// / cache_write / per_call), or expr_unverified for a price change that
+	// could neither be measured nor proven absent.
+	Dimension string `json:"dimension,omitempty"`
+	// ProbeContext is the usage vector the movement was measured at, so an
+	// admin can reproduce the projection.
+	ProbeContext  string   `json:"probe_context,omitempty"`
+	PreviousUSD   *float64 `json:"previous_usd,omitempty"`
+	CurrentUSD    *float64 `json:"current_usd,omitempty"`
+	ChangeRate    *float64 `json:"change_rate,omitempty"`
+	FromZero      *bool    `json:"from_zero,omitempty"`
+	JumpThreshold *float64 `json:"jump_threshold,omitempty"`
+	// JumpCount is how many movements the run observed and ReportedCount how
+	// many the bounded summary carries; they differ when the summary was
+	// truncated, so a client can say "20 of 137" rather than imply 20 is all.
+	JumpCount     *int `json:"jump_count,omitempty"`
+	ReportedCount *int `json:"reported_count,omitempty"`
 }
 
 // UpstreamPriceAlert is one catalog health signal (spec §13). Alerts are shown

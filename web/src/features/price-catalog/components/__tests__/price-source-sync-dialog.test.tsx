@@ -74,6 +74,7 @@ const preview: PricePreviewResponse = {
   changed_count: 1,
   unchanged_count: 0,
   coverage_drop_exceeded: false,
+  price_jump_count: 0,
   items: [
     {
       source_model_name: 'openai/gpt-4o',
@@ -98,6 +99,7 @@ const committedRun: PriceSyncResponse = {
   missing_count: 0,
   new_snapshot_count: 1,
   idempotent_hit_count: 1,
+  price_jump_count: 0,
 }
 
 function renderDialog(

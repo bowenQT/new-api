@@ -129,6 +129,11 @@ export interface PricePreviewResponse {
   changed_count: number
   unchanged_count: number
   coverage_drop_exceeded: boolean
+  /**
+   * How many price movements past the source threshold committing this plan
+   * would record. It never refuses the commit.
+   */
+  price_jump_count: number
   items: PricePreviewItem[]
   missing: string[]
   preview_token: string
@@ -147,6 +152,8 @@ export interface PriceSyncResponse {
   new_snapshot_count: number
   idempotent_hit_count: number
   error_summary?: string
+  /** How many price movements past the source threshold this run recorded. */
+  price_jump_count: number
 }
 
 /**
@@ -168,6 +175,33 @@ export interface PriceAlertParams {
    */
   gate_refused?: boolean
   group?: string
+  /**
+   * The upstream model whose price moved. Sent alongside
+   * `canonical_model_name` because several source models can map to one
+   * canonical model, so the canonical name alone does not say which upstream
+   * entry changed.
+   */
+  source_model_name?: string
+  /**
+   * The price dimension that moved, or `expr_unverified` for a change the
+   * backend could neither measure nor prove absent.
+   */
+  dimension?: string
+  /** The usage vector the movement was measured at. */
+  probe_context?: string
+  previous_usd?: number
+  current_usd?: number
+  change_rate?: number
+  /** The price was zero before, so the change rate is undefined. */
+  from_zero?: boolean
+  jump_threshold?: number
+  /**
+   * How many movements the run observed (`jump_count`) versus how many the
+   * bounded summary carries (`reported_count`). They differ when the summary
+   * was truncated.
+   */
+  jump_count?: number
+  reported_count?: number
 }
 
 /**

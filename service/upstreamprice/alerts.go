@@ -24,6 +24,11 @@ const (
 	// Its prices stop counting as confirmed costs until the next sync, so the
 	// admin must be told why they dropped out of the margin.
 	AlertSourceConfigChanged = "source_config_changed"
+	// AlertPriceJump fires while the last successful run recorded a price
+	// movement past the source's threshold (spec §13). It is derived from the
+	// evidence that run stored, so it persists until the next successful sync
+	// says otherwise, exactly like source_config_changed.
+	AlertPriceJump = "price_jump"
 )
 
 // ConsecutiveFailureAlertThreshold is the number of trailing failed runs that
@@ -77,6 +82,9 @@ func EvaluateSourceAlerts(sources []*model.PriceSource, now int64) ([]dto.Upstre
 				Detail:     fmt.Sprintf("source configuration changed after run %d; its prices are not confirmed until the next successful sync", runId),
 				Params:     &dto.UpstreamPriceAlertParams{RunId: &runId},
 			})
+		}
+		if len(successfulRuns) > 0 {
+			alerts = append(alerts, priceJumpAlerts(source, successfulRuns[0])...)
 		}
 		if len(successfulRuns) > 0 && PriceRole(source.Role) == RoleSupplierCost {
 			latest := successfulRuns[0]
@@ -165,6 +173,79 @@ func coverageDropAlert(source *model.PriceSource, baseline, observed *model.Pric
 			GateRefused:        &refused,
 		},
 	}
+}
+
+// priceJumpAlerts turns the price movements the last successful run recorded
+// into one alert per movement (spec §13).
+//
+// The measurement itself happened during that run's planning, where both the
+// baseline snapshot and the incoming price were in hand; alerting only reads
+// the bounded evidence it stored, so no expression is re-evaluated and no
+// additional query is issued here. A run written before the column existed, a
+// run whose fingerprints did not change, and a 304 replay all carry no summary
+// and raise nothing.
+func priceJumpAlerts(source *model.PriceSource, run *model.PriceSyncRun) []dto.UpstreamPriceAlert {
+	summary := decodePriceJumpSummary(run.PriceJumpSummary)
+	if len(summary.Entries) == 0 {
+		return nil
+	}
+	runId, threshold := run.Id, summary.Threshold
+	total, reported := summary.Total, len(summary.Entries)
+	alerts := make([]dto.UpstreamPriceAlert, 0, reported)
+	for _, entry := range summary.Entries {
+		params := &dto.UpstreamPriceAlertParams{
+			RunId:           &runId,
+			SourceModelName: entry.SourceModelName,
+			Dimension:       entry.Dimension,
+			ProbeContext:    entry.ProbeContext,
+			PreviousUSD:     entry.PreviousUSD,
+			CurrentUSD:      entry.CurrentUSD,
+			ChangeRate:      entry.ChangeRate,
+			JumpThreshold:   &threshold,
+			JumpCount:       &total,
+			ReportedCount:   &reported,
+		}
+		if entry.FromZero {
+			fromZero := true
+			params.FromZero = &fromZero
+		}
+		alerts = append(alerts, dto.UpstreamPriceAlert{
+			Code:               AlertPriceJump,
+			SourceId:           source.Id,
+			SourceName:         source.Name,
+			CanonicalModelName: entry.CanonicalModelName,
+			Detail:             priceJumpDetail(runId, entry),
+			Params:             params,
+		})
+	}
+	return alerts
+}
+
+// priceJumpDetail is the English fallback sentence of one movement. Clients
+// that understand Params render their own localized message from the same
+// facts; this string is what an older client and the backend log show.
+func priceJumpDetail(runId int, entry priceJumpEntry) string {
+	if entry.Dimension == PriceJumpDimensionExprUnverified {
+		return fmt.Sprintf("run %d changed the price of %q in a way this check could not measure; review it manually",
+			runId, entry.SourceModelName)
+	}
+	previous, current := float64(0), float64(0)
+	if entry.PreviousUSD != nil {
+		previous = *entry.PreviousUSD
+	}
+	if entry.CurrentUSD != nil {
+		current = *entry.CurrentUSD
+	}
+	if entry.FromZero {
+		return fmt.Sprintf("run %d moved the %s price of %q from 0 to %g USD at %s",
+			runId, entry.Dimension, entry.SourceModelName, current, entry.ProbeContext)
+	}
+	rate := float64(0)
+	if entry.ChangeRate != nil {
+		rate = *entry.ChangeRate
+	}
+	return fmt.Sprintf("run %d moved the %s price of %q from %g to %g USD (%.2f%%) at %s",
+		runId, entry.Dimension, entry.SourceModelName, previous, current, rate*100, entry.ProbeContext)
 }
 
 // LogPriceCatalogAlerts writes alerts to the backend log. Callers invoke it

@@ -340,7 +340,7 @@ Vercel adapter 必须：
 数据库约束：
 
 - `channel_id` 使用普通索引，不依赖数据库特有 partial index。
-- `settings` 使用 TEXT，由 `common.Marshal` / `common.Unmarshal` 管理。
+- `settings` 使用 TEXT，由 `common.Marshal` / `common.Unmarshal` 管理，按严格白名单解析（未知键一律拒绝，不静默忽略）。当前白名单为 `model_mappings`（§7.5）、`coverage_drop_threshold`（§8.2）、`stale_threshold_seconds`（§8.3）、`price_jump_threshold`（§13）。
 - secret 只引用现有渠道凭证，不复制进 `settings`。
 - 角色与渠道组合约束：`supplier_cost` 来源创建/更新时必须关联一个存在且启用的 channel；`vendor_list` / `curated_reference` 不得关联 channel。MySQL 5.7 的 CHECK 约束不可靠，以 service 层校验为权威，并配行为测试。
 - 渠道删除不挂钩：不修改现有渠道删除路径（单删、批量删、删除禁用渠道均直接删除 Channel，挂钩这三条路径会扩大对 upstream-owned 代码的修改面）。改为查询与调度侧 orphan 检测：关联 channel 不存在时来源标记 `orphaned`，UI 明示；orphan 来源允许 Preview（诊断用途），手动 Commit 与定时执行一律拒绝，历史快照保留。
@@ -410,6 +410,7 @@ Vercel adapter 必须：
 | `idempotent_hit_count` | int | 幂等命中数 |
 | `error_summary` | varchar(255) | 脱敏错误摘要 |
 | `coverage_drop_exceeded` | nullable bool | 本次 run 是否被覆盖率门禁拒绝；告警据此判定，不解析 `error_summary`。可空以兼容该列存在前写入的旧行（`nil` 按「不是门禁拒绝」处理），且不声明布尔默认值，避免 AutoMigrate 在 MySQL/PostgreSQL 上反复 ALTER |
+| `price_jump_summary` | text | 本次 run 相对基线 run 观察到的价格变化证据（§13），有界 JSON：`version`、`probe_version`、`threshold`、`total`（观察总数）与 `entries`（按幅度降序截断，至多 20 条，序列化上限 8KB）。每条含 `source_model_name`、`canonical_model_name`、`dimension`、`probe_context`、`previous_usd`、`current_usd`、`change_rate`、`from_zero`。空串表示「本次 run 没有观察到变化」——该列存在前写入的旧行、fingerprint 未变的 run 与 304 回放 run 读回的都是空串，语义一致，告警直接据此判定。三库通用的 text 列，不声明默认值 |
 
 每个 run 同时写入条目明细 `PriceSyncRunItem`：
 
@@ -747,13 +748,25 @@ POST /api/upstream-prices/sale-candidate
 
 Phase 2 实施口径（§21 Q6 裁决：仅后台展示 + 日志，不接通知渠道）：
 
-- 已实现五类：来源连续 3 次同步失败（`source_consecutive_failures`）、成本来源超 stale 阈值（`source_stale`）、模型覆盖率下降超门禁（`coverage_drop`）、来源配置在最近一次成功 run 之后被改（`source_config_changed`）、默认分组成本倒挂（`cost_inversion`）。
-- 前四类按 run 历史在读取时派生，随 `GET /api/upstream-price-sources/alerts`、`GET /api/upstream-prices/current` 与 `POST /api/upstream-prices/compare` 返回；倒挂由 compare 在同一 usage vector 下计算，因此不出现在来源级告警端点。
+- 已实现六类：来源连续 3 次同步失败（`source_consecutive_failures`）、成本来源超 stale 阈值（`source_stale`）、模型覆盖率下降超门禁（`coverage_drop`）、来源配置在最近一次成功 run 之后被改（`source_config_changed`）、单个模型价格变化超阈值（`price_jump`）、默认分组成本倒挂（`cost_inversion`）。
+- 前五类按 run 历史在读取时派生，随 `GET /api/upstream-price-sources/alerts`、`GET /api/upstream-prices/current` 与 `POST /api/upstream-prices/compare` 返回；倒挂由 compare 在同一 usage vector 下计算，因此不出现在来源级告警端点。
 - `coverage_drop` 的判定基准是**最近一次尝试**，不是最近两次成功 run：覆盖率暴跌会被门禁拒绝，被拒的 run 记为 `failed` 且不推进 baseline，只比较成功 run 会让最需要告警的场景反而无告警。判定依据是 run 上的显式列 `coverage_drop_exceeded`（可空布尔，`nil` 表示该列存在前写入的旧行，按「不是门禁拒绝」处理），不解析 `error_summary` 文本，也不从计数反推。最近一次尝试是门禁拒绝时，与上一次成功 run 比较并置 `params.gate_refused=true`；否则退回最近两次成功 run 的比较。
 - 写日志的位置是改变目录状态的路径（写入 run 之后），不是查询路径，避免日志随后台 UI 流量放大。该位置是手工与调度**共用**的写后钩子：手工 commit、调度 commit、被门禁拒绝的 run、抓取失败的 run 和调度 plan 前失败的轻量 run 都会触发一次告警评估与日志。定时同步默认关闭，把告警日志只挂在调度路径上等于默认永不落日志。
 - 成本倒挂日志按本次写入实际置为 current 的 canonical 模型集合评估（超过单次请求上限时分批），不再对全目录做一次全量比较：手工 commit 是交互式请求，而未被本次同步触及的模型的成本不可能因这次同步而改变。
-- 每条告警在 `detail`（英文串，保持兼容）之外回带结构化 `params`，供前端本地化：`source_consecutive_failures` → `failure_count`；`source_stale` → `run_id`、`age_seconds`、`threshold_seconds`；`source_config_changed` → `run_id`；`coverage_drop` → `run_id`、`previous_valid_count`、`valid_count`、`drop_threshold`、`gate_refused`；`cost_inversion` → `group`。
-- 「单次价格变化超过百分比阈值」仍未实现：现有变化门禁是覆盖率维度的，价格幅度阈值需要新的 per-model 基线比较，留待后续。
+- 每条告警在 `detail`（英文串，保持兼容）之外回带结构化 `params`，供前端本地化：`source_consecutive_failures` → `failure_count`；`source_stale` → `run_id`、`age_seconds`、`threshold_seconds`；`source_config_changed` → `run_id`；`coverage_drop` → `run_id`、`previous_valid_count`、`valid_count`、`drop_threshold`、`gate_refused`；`price_jump` → `run_id`、`source_model_name`、`dimension`、`probe_context`、`previous_usd`、`current_usd`、`change_rate`、`from_zero`、`jump_threshold`、`jump_count`、`reported_count`；`cost_inversion` → `group`。
+
+`price_jump`（单次价格变化超阈值）实施口径：
+
+- 判定发生在 `buildSyncPlan`：只对 fingerprint 已变（`change = changed`）的 valid item 求值，与基线快照按 `source_model_name` 配对。新模型没有可比基线，unchanged 模型与基线逐字节相同，二者天然不参与。
+- 幅度用**探针求值**度量，不解析表达式系数：新旧两侧在同一 usage vector 下经 `billingexpr.RunBaseExpr` 投影成 USD（`token_expr_v1` 除以 1e6，`per_call_v1` 直接取值），因此 flat、tiered 与 per-call 在同一口径上可比，`formula_kind` 变化按 §6.1 折成 USD 比较而非无条件标复核。
+- 探针点不是固定的：除四个维度各一个 1e6 单位向量 × 两个上下文（`len=1000` / `len=1000000`）外，还从**新旧两个已编译表达式**的 AST 提取每个 usage 变量被比较的数值边界（`billingexpr.TierBoundaries`），在边界及其 ±1 处加测。这样「系数全未变、只有分档边界移动」的改价才会被测到；固定采样点结构上看不见它。单模型探针数有上限。
+- `per_call_v1` 用同样的非零单位向量求值（validator 不禁止 per-call 表达式引用 usage 变量，`p * k` 是合法形态），但四个探针归并为单一维度 `per_call`，因为按次价格不按 token 类别分摊。
+- 变化率 = `|new - old| / |old|`。两侧同为 0 不报；`old = 0 且 new ≠ 0` 无定义速率，置 `from_zero` 并直接上报；`new = 0 且 old > 0` 速率为 1。同一维度多个探针只保留幅度最大的一条，并回带该探针的 `probe_context`。
+- **Fail closed**：fingerprint 已变、所有探针的差值都严格为 0、且两个表达式无法被证明等价（同 `formula_kind` 且编译后 AST 打印形式相同，见 `billingexpr.CanonicalForm`）时，记一条 `dimension = expr_unverified` 的条目标记需复核。它不带速率、不是阈值突破，只是「测不出也证不了」的如实记录。反之，探针测到了变化只是未过阈值（含 USD 等值的 kind 变化），属于已解释，不标复核；表达式可证等价（fingerprint 因 canonical 名、metadata、`effective_at` 等非价格字段变化）也不标复核。
+- 阈值 `settings.price_jump_threshold`，默认 `0.5`，校验范围 `(0, 1000]`。变化率不是「整体的一个比例」，10 倍涨价是 9.0，因此范围不照抄 `coverage_drop_threshold` 的 `(0, 1]`。
+- **不阻断 commit**：run status、覆盖率判定与 commit 事务完全不受影响，摘要只是 run 上的证据；preview 与 sync 响应回带 `price_jump_count`，让管理员在提交前就看到本次会记录什么。摘要不进 preview digest：它是 digest 已覆盖的输入（各 item fingerprint 与 claim 中的 `base_run_id`）的确定函数，进 digest 不增加 CAS 强度。
+- 告警从最近一次成功 run 的 `price_jump_summary` 派生，每条条目一条告警，语义是「直到下一次成功同步为止持续提示」，与 `source_config_changed` 一致。304 回放 run 没有 fingerprint 变化，摘要为空，因此不产生告警。
+- 摘要截断时 `params` 同时回带 `jump_count`（观察总数）与 `reported_count`（摘要携带数），管理界面据此声明「只展示了其中若干条」，不把样本当作全部。
 
 ## 14. 数据保留
 
@@ -1035,7 +1048,7 @@ rev5（2026-08-28）：Phase 2 后端实施期修订。§21 Q4/Q5/Q6 的裁决�
 
 - §21 Q4 已裁决：比较分组默认 `default`，管理员可指定其他分组；未配置倍率的分组按 1 计算并在响应标注（§10.3 补实施口径）。
 - §21 Q5 已裁决：历史保留期与成本可见范围维持现状（§14 的 180 天、全部接口 RootAuth、成本明细归入 `admin_info`），Phase 2 不做收紧。
-- §21 Q6 已裁决：告警只在后台展示并写入后端日志，不接入通知渠道（§13 补实施口径与已实现的四类告警；价格幅度阈值告警仍未实现）。
+- §21 Q6 已裁决：告警只在后台展示并写入后端日志，不接入通知渠道（§13 补实施口径与已实现的四类告警）。价格幅度阈值告警当时未实现，已在 rev5.2 补齐。
 - §6.3：curated_reference 接入范围未缩小——models.dev 与 basellm 均确认有稳定免鉴权的机器可读端点，payload 形状一致、共用解析器；归一化限定为四类 flat token 价格，含 `tiers` / `context_over_200k` 的模型整条记为 unsupported。
 - §8.4：补 Phase 2 调度实施口径——`UPSTREAM_PRICE_SYNC_TASK_ENABLED` 默认关闭、15 分钟唤醒、6 小时下限双重强制、失败退避、单来源与总超时、orphan 拒绝执行、复用同一条 commit 路径。
 - §9.3 的 billingexpr 基础表达式投影增量 API 已落地为 `billingexpr.RunBaseExpr`：编译期把 instrument 过的 request-rule 因子替换为字面量 1，独立程序与独立缓存，不改变 `RunExpr` 语义；中和后仍引用 request probe 的表达式返回 `ErrRequestRuleNotProjectable`，compare 标注“含请求规则，无法投影”。
@@ -1056,3 +1069,9 @@ rev5.2（2026-08-29）：curated_reference 条件请求（issue #9）。
 - §7.2：写明归一化语义变化必须 bump `fingerprint_version`，这是上述门禁的前提。
 - §7.3：`source_revision` 补充其作为下次条件请求验证器的用途，以及「只落 run、不进 settings、不污染 digest」。
 - §8.3、§8.4：304 与全量 run 同样推进 `last_success_run_id` 与 stale 基准；304 是成功路径，不进调度失败语义表。
+
+rev5.3（2026-08-29）：价格突变阈值告警（issue #7）。
+
+- §7.3：run 增加 `price_jump_summary` text 列，承载本次 run 相对基线 run 的价格变化证据（有界 JSON，条目按幅度截断并回带观察总数）。不再增加布尔列——摘要本身就是证据，另设布尔会出现「true 但摘要为空」的不一致态。
+- §13：`price_jump` 从「建议告警、仍未实现」改为已实现，补完整实施口径——探针求值口径、从新旧两个已编译表达式 AST 提取分档边界并在边界 ±1 加测、`per_call_v1` 用非零单位向量、`formula_kind` 变化按 §6.1 折 USD 比较、测不出且证不了等价时 fail closed 记 `expr_unverified`、阈值范围 `(0, 1000]`、不阻断 commit、304 回放不产生摘要。已实现告警计为六类。
+- §7.1：`settings` 白名单增加 `price_jump_threshold`。

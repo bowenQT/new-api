@@ -194,6 +194,16 @@ func ValidatePriceSourceForWrite(source *model.PriceSource) error {
 	if config.Settings.StaleThresholdSeconds != nil && *config.Settings.StaleThresholdSeconds <= 0 {
 		return errors.New("stale_threshold_seconds must be positive")
 	}
+	if config.Settings.PriceJumpThreshold != nil {
+		threshold := *config.Settings.PriceJumpThreshold
+		// A price change rate is not a fraction of a whole the way a coverage
+		// drop is: doubling a price is 1.0 and a tenfold increase is 9.0, so
+		// the accepted range must extend well past 1 while still refusing a
+		// value so large it can never fire.
+		if math.IsNaN(threshold) || threshold <= 0 || threshold > MaxPriceJumpThreshold {
+			return fmt.Errorf("price_jump_threshold must be in (0, %g]", MaxPriceJumpThreshold)
+		}
+	}
 	for from, to := range config.Settings.ModelMappings {
 		if from == "" || len(from) > MaxSourceModelNameLength {
 			return fmt.Errorf("model mapping key must be 1-%d bytes", MaxSourceModelNameLength)

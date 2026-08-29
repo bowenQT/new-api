@@ -5400,7 +5400,7 @@
     "Not projectable": "无法投影",
     "Notes": "备注",
     "Observed upstream prices. Nothing here changes what users are charged.": "这里是观察到的上游价格，任何操作都不会改变用户的实际扣费。",
-    "Optional. Only model_mappings, coverage_drop_threshold and stale_threshold_seconds are accepted; credentials and endpoints are rejected.": "可选。只接受 model_mappings、coverage_drop_threshold 与 stale_threshold_seconds；凭证与端点会被拒绝。",
+    "Optional. Only model_mappings, coverage_drop_threshold, stale_threshold_seconds and price_jump_threshold are accepted; credentials and endpoints are rejected.": "可选。只接受 model_mappings、coverage_drop_threshold、stale_threshold_seconds 与 price_jump_threshold；凭证与端点会被拒绝。",
     "Other ratios": "其他倍率",
     "Per-call price": "按次计价",
     "Per-request billing ratios": "请求级计费倍率",
@@ -5495,6 +5495,16 @@
     "The coverage gate refused run #{{runId}}. Valid model coverage would have fallen from {{previous}} to {{current}} models, past the {{gate}} drop gate, so nothing was written.": "覆盖率门禁拒绝了运行 #{{runId}}。有效模型覆盖数将从 {{previous}} 降至 {{current}}，超过 {{gate}} 的下降门禁，因此本次未写入任何数据。",
     "Unnormalized source pricing dimensions: {{dimensions}}": "来源含未归一化的价格维度：{{dimensions}}",
     "Source is disabled": "来源已禁用",
-    "This source is disabled. Preview stays available for diagnosis, but the server refuses to commit a sync until the source is enabled again.": "该来源已禁用。预览仍可用于排查，但在重新启用之前，服务端会拒绝提交同步。"
+    "This source is disabled. Preview stays available for diagnosis, but the server refuses to commit a sync until the source is enabled again.": "该来源已禁用。预览仍可用于排查，但在重新启用之前，服务端会拒绝提交同步。",
+    "Cache read": "缓存读取",
+    "Per call": "按次计费",
+    "Unverified expression": "表达式未能核验",
+    "Upstream price changed sharply": "上游价格大幅变化",
+    "Sharp price change, needs review": "价格大幅变化，需复核",
+    "The {{dimension}} price of {{model}} moved from {{previous}} to {{current}} ({{rate}}) at {{context}}.": "{{model}} 的{{dimension}}价格在 {{context}} 下从 {{previous}} 变为 {{current}}（{{rate}}）。",
+    "The {{dimension}} price of {{model}} moved from zero to {{current}} at {{context}}.": "{{model}} 的{{dimension}}价格在 {{context}} 下从 0 变为 {{current}}。",
+    "The price of {{model}} changed in a way this check could not measure. Review it manually.": "{{model}} 的价格发生了本次检查无法测量的变化，请人工复核。",
+    "{{count}} further price change(s) were recorded but are not listed.": "另有 {{count}} 项价格变化已记录但未在此列出。",
+    "This sync would record {{count}} price change(s) past the configured threshold. The commit is not blocked; review the changed models afterwards.": "本次同步会记录 {{count}} 项超过阈值的价格变化。提交不会被阻断，请在同步后复核这些模型。"
   }
 }

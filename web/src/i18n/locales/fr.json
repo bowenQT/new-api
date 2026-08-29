@@ -5400,7 +5400,7 @@
     "Not projectable": "Non projetable",
     "Notes": "Remarques",
     "Observed upstream prices. Nothing here changes what users are charged.": "Prix amont observés. Rien ici ne modifie ce qui est facturé aux utilisateurs.",
-    "Optional. Only model_mappings, coverage_drop_threshold and stale_threshold_seconds are accepted; credentials and endpoints are rejected.": "Facultatif. Seuls model_mappings, coverage_drop_threshold et stale_threshold_seconds sont acceptés ; les identifiants et points de terminaison sont refusés.",
+    "Optional. Only model_mappings, coverage_drop_threshold, stale_threshold_seconds and price_jump_threshold are accepted; credentials and endpoints are rejected.": "Facultatif. Seuls model_mappings, coverage_drop_threshold, stale_threshold_seconds et price_jump_threshold sont acceptés ; les identifiants et les endpoints sont rejetés.",
     "Other ratios": "Autres ratios",
     "Per-call price": "Prix par appel",
     "Per-request billing ratios": "Ratios de facturation par requête",
@@ -5495,6 +5495,16 @@
     "The coverage gate refused run #{{runId}}. Valid model coverage would have fallen from {{previous}} to {{current}} models, past the {{gate}} drop gate, so nothing was written.": "Le seuil de couverture a refusé l'exécution n° {{runId}}. La couverture des modèles valides serait passée de {{previous}} à {{current}}, au-delà du seuil de baisse de {{gate}}, donc rien n'a été écrit.",
     "Unnormalized source pricing dimensions: {{dimensions}}": "Dimensions tarifaires de la source non normalisées : {{dimensions}}",
     "Source is disabled": "Source désactivée",
-    "This source is disabled. Preview stays available for diagnosis, but the server refuses to commit a sync until the source is enabled again.": "Cette source est désactivée. L'aperçu reste disponible pour le diagnostic, mais le serveur refuse de valider une synchronisation tant qu'elle n'est pas réactivée."
+    "This source is disabled. Preview stays available for diagnosis, but the server refuses to commit a sync until the source is enabled again.": "Cette source est désactivée. L'aperçu reste disponible pour le diagnostic, mais le serveur refuse de valider une synchronisation tant qu'elle n'est pas réactivée.",
+    "Cache read": "Lecture du cache",
+    "Per call": "Par appel",
+    "Unverified expression": "Expression non vérifiée",
+    "Upstream price changed sharply": "Le prix amont a fortement changé",
+    "Sharp price change, needs review": "Changement de prix marqué, à vérifier",
+    "The {{dimension}} price of {{model}} moved from {{previous}} to {{current}} ({{rate}}) at {{context}}.": "Le prix {{dimension}} de {{model}} est passé de {{previous}} à {{current}} ({{rate}}) pour {{context}}.",
+    "The {{dimension}} price of {{model}} moved from zero to {{current}} at {{context}}.": "Le prix {{dimension}} de {{model}} est passé de zéro à {{current}} pour {{context}}.",
+    "The price of {{model}} changed in a way this check could not measure. Review it manually.": "Le prix de {{model}} a changé d'une manière que ce contrôle n'a pas pu mesurer. Vérifiez-le manuellement.",
+    "{{count}} further price change(s) were recorded but are not listed.": "{{count}} autre(s) changement(s) de prix ont été enregistrés mais ne sont pas listés.",
+    "This sync would record {{count}} price change(s) past the configured threshold. The commit is not blocked; review the changed models afterwards.": "Cette synchronisation enregistrerait {{count}} changement(s) de prix au-delà du seuil configuré. La validation n'est pas bloquée ; vérifiez ensuite les modèles concernés."
   }
 }

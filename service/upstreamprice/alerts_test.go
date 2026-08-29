@@ -1,6 +1,7 @@
 package upstreamprice
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -173,6 +174,111 @@ func TestEvaluateSourceAlertsCoverageDropOnRefusedRun(t *testing.T) {
 	assert.Equal(t, DefaultCoverageDropThreshold, *coverage.Params.DropThreshold)
 	require.NotNil(t, coverage.Params.GateRefused)
 	assert.True(t, *coverage.Params.GateRefused)
+}
+
+// TestEvaluateSourceAlertsPriceJump pins the derivation contract of the §13
+// price movement alert: it reads the evidence the last successful run stored
+// and reports every field the admin needs to judge the movement, including both
+// names of the model.
+func TestEvaluateSourceAlertsPriceJump(t *testing.T) {
+	db := setupCompareTestDB(t)
+	now := common.GetTimestamp()
+	source := createAlertTestSource(t, RoleCuratedReference, nil, "")
+
+	// A successful run that recorded no movement raises nothing, and neither
+	// does a run written before the column existed — both read back empty.
+	quiet := createAlertTestRun(t, db, source.Id, model.PriceSyncRunStatusSucceeded, 10, now)
+	source.LastSuccessRunId = &quiet.Id
+	assert.NotContains(t, alertCodes(t, source, now), AlertPriceJump)
+
+	jumped := createAlertTestRun(t, db, source.Id, model.PriceSyncRunStatusSucceeded, 10, now)
+	previous, current := 0.2, 2.0
+	rate := 9.0
+	summary := encodePriceJumpSummary(DefaultPriceJumpThreshold, []priceJumpEntry{{
+		SourceModelName:    "openai/gpt-5.6-luna",
+		CanonicalModelName: "gpt-5.6-luna",
+		Dimension:          PriceJumpDimensionInput,
+		ProbeContext:       "p=1000000,len=1000",
+		PreviousUSD:        &previous,
+		CurrentUSD:         &current,
+		ChangeRate:         &rate,
+	}})
+	require.NotEmpty(t, summary)
+	require.NoError(t, db.Model(&model.PriceSyncRun{}).Where("id = ?", jumped.Id).
+		Update("price_jump_summary", summary).Error)
+	source.LastSuccessRunId = &jumped.Id
+
+	alerts, err := EvaluateSourceAlerts([]*model.PriceSource{source}, now)
+	require.NoError(t, err)
+	var jump *dto.UpstreamPriceAlert
+	for i := range alerts {
+		if alerts[i].Code == AlertPriceJump {
+			jump = &alerts[i]
+		}
+	}
+	require.NotNil(t, jump, "a recorded price movement must raise an alert")
+	assert.Equal(t, "gpt-5.6-luna", jump.CanonicalModelName)
+	require.NotNil(t, jump.Params)
+	assert.Equal(t, "openai/gpt-5.6-luna", jump.Params.SourceModelName)
+	assert.Equal(t, PriceJumpDimensionInput, jump.Params.Dimension)
+	assert.Equal(t, "p=1000000,len=1000", jump.Params.ProbeContext)
+	require.NotNil(t, jump.Params.RunId)
+	assert.Equal(t, jumped.Id, *jump.Params.RunId)
+	require.NotNil(t, jump.Params.PreviousUSD)
+	assert.Equal(t, 0.2, *jump.Params.PreviousUSD)
+	require.NotNil(t, jump.Params.CurrentUSD)
+	assert.Equal(t, 2.0, *jump.Params.CurrentUSD)
+	require.NotNil(t, jump.Params.ChangeRate)
+	assert.Equal(t, 9.0, *jump.Params.ChangeRate)
+	require.NotNil(t, jump.Params.JumpThreshold)
+	assert.Equal(t, DefaultPriceJumpThreshold, *jump.Params.JumpThreshold)
+	require.NotNil(t, jump.Params.JumpCount)
+	assert.Equal(t, 1, *jump.Params.JumpCount)
+	require.NotNil(t, jump.Params.ReportedCount)
+	assert.Equal(t, 1, *jump.Params.ReportedCount)
+	assert.Nil(t, jump.Params.FromZero)
+
+	// The alert follows the newest successful run: a later quiet sync clears it.
+	cleared := createAlertTestRun(t, db, source.Id, model.PriceSyncRunStatusSucceeded, 10, now)
+	source.LastSuccessRunId = &cleared.Id
+	assert.NotContains(t, alertCodes(t, source, now), AlertPriceJump)
+}
+
+// TestEvaluateSourceAlertsPriceJumpTruncatedCount pins that a truncated summary
+// reports the movements it carries while still stating how many were observed,
+// so an admin is never shown 20 movements as if they were all of them.
+func TestEvaluateSourceAlertsPriceJumpTruncatedCount(t *testing.T) {
+	db := setupCompareTestDB(t)
+	now := common.GetTimestamp()
+	source := createAlertTestSource(t, RoleCuratedReference, nil, "")
+	run := createAlertTestRun(t, db, source.Id, model.PriceSyncRunStatusSucceeded, 200, now)
+
+	entries := make([]priceJumpEntry, 0, MaxPriceJumpEntries*2)
+	for i := 0; i < MaxPriceJumpEntries*2; i++ {
+		rate := float64(i + 1)
+		entries = append(entries, priceJumpEntry{
+			SourceModelName: fmt.Sprintf("vendor/model-%02d", i),
+			Dimension:       PriceJumpDimensionInput,
+			ChangeRate:      &rate,
+		})
+	}
+	require.NoError(t, db.Model(&model.PriceSyncRun{}).Where("id = ?", run.Id).
+		Update("price_jump_summary", encodePriceJumpSummary(DefaultPriceJumpThreshold, entries)).Error)
+	source.LastSuccessRunId = &run.Id
+
+	alerts, err := EvaluateSourceAlerts([]*model.PriceSource{source}, now)
+	require.NoError(t, err)
+	jumps := make([]dto.UpstreamPriceAlert, 0, MaxPriceJumpEntries)
+	for _, alert := range alerts {
+		if alert.Code == AlertPriceJump {
+			jumps = append(jumps, alert)
+		}
+	}
+	require.Len(t, jumps, MaxPriceJumpEntries)
+	require.NotNil(t, jumps[0].Params.JumpCount)
+	assert.Equal(t, MaxPriceJumpEntries*2, *jumps[0].Params.JumpCount)
+	require.NotNil(t, jumps[0].Params.ReportedCount)
+	assert.Equal(t, MaxPriceJumpEntries, *jumps[0].Params.ReportedCount)
 }
 
 // TestListSourceAlertsMatchesCatalogProjection locks the contract the
