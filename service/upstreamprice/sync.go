@@ -13,6 +13,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"time"
@@ -118,6 +119,49 @@ func DoCatalogRequest(ctx context.Context, client *http.Client, buildRequest fun
 	}
 	cancel()
 	return nil, lastErr
+}
+
+// ValidatePinnedEndpoint refuses to fetch from anything but the adapter's own
+// pinned public catalog URL: https only, and an exact host match so a
+// suffix-forged domain such as "models.dev.evil.example" is rejected (spec
+// §12). label names the adapter in the error text. allowTestEndpoint is the
+// package-internal escape hatch adapters expose to their own tests so a fixture
+// can be served from httptest; production constructors never set it.
+func ValidatePinnedEndpoint(label string, endpoint string, host string, allowTestEndpoint bool) error {
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		return fmt.Errorf("invalid %s endpoint: %w", label, err)
+	}
+	if allowTestEndpoint {
+		return nil
+	}
+	if parsed.Scheme != "https" || parsed.Hostname() != host {
+		return fmt.Errorf("%s adapter only accepts %s", label, endpoint)
+	}
+	return nil
+}
+
+// ReadBoundedCatalogBody reads a catalog response body under an explicit size
+// bound, reading one byte past it so an oversized body is detected rather than
+// silently truncated into a parseable prefix. maxResponseBytes falls back to
+// MaxFetchResponseBytes when the adapter declares no limit of its own.
+//
+// The returned byte count is what the run records as its response size: it is
+// reported for an oversized body too, and stays zero when the read itself
+// failed. Callers wrap the returned error with their own adapter prefix; it
+// never carries any part of the response.
+func ReadBoundedCatalogBody(body io.Reader, maxResponseBytes int64) ([]byte, int64, error) {
+	if maxResponseBytes <= 0 {
+		maxResponseBytes = MaxFetchResponseBytes
+	}
+	read, err := io.ReadAll(io.LimitReader(body, maxResponseBytes+1))
+	if err != nil {
+		return nil, 0, fmt.Errorf("read failed: %w", err)
+	}
+	if int64(len(read)) > maxResponseBytes {
+		return nil, int64(len(read)), fmt.Errorf("response exceeds %d bytes", maxResponseBytes)
+	}
+	return read, int64(len(read)), nil
 }
 
 // NewCatalogHTTPClient builds the hardened HTTP client all price adapters

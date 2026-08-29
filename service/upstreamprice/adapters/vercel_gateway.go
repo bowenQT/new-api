@@ -6,9 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -77,29 +75,9 @@ func (a *VercelGatewayAdapter) Endpoint() string {
 	return a.endpoint
 }
 
-// isCanonicalVercelHost accepts only the exact gateway host, refusing forged
-// suffix domains such as "ai-gateway.vercel.sh.evil.example".
-func isCanonicalVercelHost(host string) bool {
-	return host == vercelCanonicalHost
-}
-
-func (a *VercelGatewayAdapter) validateEndpoint() error {
-	parsed, err := url.Parse(a.endpoint)
-	if err != nil {
-		return fmt.Errorf("invalid vercel endpoint: %w", err)
-	}
-	if a.allowTestEndpoint {
-		return nil
-	}
-	if parsed.Scheme != "https" || !isCanonicalVercelHost(parsed.Hostname()) {
-		return fmt.Errorf("vercel adapter only accepts %s", vercelEndpoint)
-	}
-	return nil
-}
-
 func (a *VercelGatewayAdapter) Fetch(ctx context.Context, source upstreamprice.SourceConfig) ([]upstreamprice.Observation, upstreamprice.FetchMeta, error) {
 	meta := upstreamprice.FetchMeta{}
-	if err := a.validateEndpoint(); err != nil {
+	if err := upstreamprice.ValidatePinnedEndpoint("vercel", a.endpoint, vercelCanonicalHost, a.allowTestEndpoint); err != nil {
 		return nil, meta, err
 	}
 	response, err := upstreamprice.DoCatalogRequest(ctx, a.client, func(requestCtx context.Context) (*http.Request, error) {
@@ -122,17 +100,10 @@ func (a *VercelGatewayAdapter) Fetch(ctx context.Context, source upstreamprice.S
 		return nil, meta, fmt.Errorf("vercel fetch: http %d", response.StatusCode)
 	}
 
-	maxResponseBytes := a.maxResponseBytes
-	if maxResponseBytes <= 0 {
-		maxResponseBytes = upstreamprice.MaxFetchResponseBytes
-	}
-	body, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
+	body, readBytes, err := upstreamprice.ReadBoundedCatalogBody(response.Body, a.maxResponseBytes)
+	meta.ResponseBytes = readBytes
 	if err != nil {
-		return nil, meta, fmt.Errorf("vercel fetch: read failed: %w", err)
-	}
-	meta.ResponseBytes = int64(len(body))
-	if int64(len(body)) > maxResponseBytes {
-		return nil, meta, fmt.Errorf("vercel fetch: response exceeds %d bytes", maxResponseBytes)
+		return nil, meta, fmt.Errorf("vercel fetch: %w", err)
 	}
 
 	var payload vercelModelsResponse

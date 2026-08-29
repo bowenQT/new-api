@@ -54,12 +54,15 @@ func vercelSourceConfig(adapterKey string) upstreamprice.SourceConfig {
 }
 
 func TestVercelHostExactMatch(t *testing.T) {
-	assert.True(t, isCanonicalVercelHost("ai-gateway.vercel.sh"))
+	pinnedTo := func(host string) error {
+		return upstreamprice.ValidatePinnedEndpoint("vercel", "https://"+host+"/v1/models", vercelCanonicalHost, false)
+	}
+	assert.NoError(t, pinnedTo("ai-gateway.vercel.sh"))
 	// Forged suffix and prefix domains must be refused.
-	assert.False(t, isCanonicalVercelHost("ai-gateway.vercel.sh.evil.example"))
-	assert.False(t, isCanonicalVercelHost("evil-ai-gateway.vercel.sh"))
-	assert.False(t, isCanonicalVercelHost("sub.ai-gateway.vercel.sh"))
-	assert.False(t, isCanonicalVercelHost(""))
+	assert.Error(t, pinnedTo("ai-gateway.vercel.sh.evil.example"))
+	assert.Error(t, pinnedTo("evil-ai-gateway.vercel.sh"))
+	assert.Error(t, pinnedTo("sub.ai-gateway.vercel.sh"))
+	assert.Error(t, pinnedTo(""))
 
 	// A production-mode adapter pointed at a forged host fails before any
 	// network I/O.
