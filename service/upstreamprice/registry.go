@@ -51,28 +51,23 @@ func ListAdapters() []dto.UpstreamPriceAdapterView {
 
 	views := make([]dto.UpstreamPriceAdapterView, 0, len(adapters))
 	for _, adapter := range adapters {
-		roles := adapter.AllowedRoles()
-		// Only supplier_cost sources reference a channel, and every other
-		// role must not (ValidatePriceSourceForWrite). An adapter therefore
-		// requires a channel exactly when supplier_cost is its only role.
-		requiresChannel := len(roles) > 0
-		roleNames := make([]string, 0, len(roles))
-		for _, role := range roles {
+		roleNames := make([]string, 0)
+		for _, role := range adapter.AllowedRoles() {
 			roleNames = append(roleNames, string(role))
-			if role != RoleSupplierCost {
-				requiresChannel = false
-			}
 		}
 		scopeNames := make([]string, 0)
 		for _, scope := range adapter.AllowedScopes() {
 			scopeNames = append(scopeNames, string(scope))
 		}
+		endpoint := ""
+		if reporter, ok := adapter.(EndpointReporter); ok {
+			endpoint = reporter.Endpoint()
+		}
 		views = append(views, dto.UpstreamPriceAdapterView{
-			Key:             adapter.Key(),
-			AllowedRoles:    roleNames,
-			AllowedScopes:   scopeNames,
-			RequiresChannel: requiresChannel,
-			Endpoint:        adapter.Endpoint(),
+			Key:           adapter.Key(),
+			AllowedRoles:  roleNames,
+			AllowedScopes: scopeNames,
+			Endpoint:      endpoint,
 		})
 	}
 	sort.Slice(views, func(i, j int) bool { return views[i].Key < views[j].Key })

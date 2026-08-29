@@ -74,13 +74,15 @@ func (r *UpstreamPriceSyncRequest) Validate() error {
 // UpstreamPriceAdapterView describes one registered adapter's non-secret
 // contract so the admin UI builds source forms from the registry instead of a
 // hardcoded adapter table. It never carries credentials; Endpoint is the
-// pinned public catalog URL the adapter fetches from (spec §12).
+// pinned public catalog URL the adapter fetches from, empty for an adapter
+// without a fixed URL (spec §12). Whether a source needs a channel is not
+// reported here: that follows from the selected role alone
+// (upstreamprice.ValidatePriceSourceForWrite).
 type UpstreamPriceAdapterView struct {
-	Key             string   `json:"key"`
-	AllowedRoles    []string `json:"allowed_roles"`
-	AllowedScopes   []string `json:"allowed_scopes"`
-	RequiresChannel bool     `json:"requires_channel"`
-	Endpoint        string   `json:"endpoint"`
+	Key           string   `json:"key"`
+	AllowedRoles  []string `json:"allowed_roles"`
+	AllowedScopes []string `json:"allowed_scopes"`
+	Endpoint      string   `json:"endpoint"`
 }
 
 // UpstreamPriceSourceView is the admin-facing projection of a price source.
