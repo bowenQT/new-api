@@ -33,6 +33,18 @@ func GetUpstreamPriceSources(c *gin.Context) {
 	common.ApiSuccess(c, views)
 }
 
+// GetUpstreamPriceSourceAlerts returns the source-level catalog health alerts
+// (spec §13) without the catalog projection, so the source list page can render
+// them without asking for every model's current price.
+func GetUpstreamPriceSourceAlerts(c *gin.Context) {
+	alerts, err := upstreamprice.ListSourceAlerts()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, alerts)
+}
+
 func CreateUpstreamPriceSource(c *gin.Context) {
 	request := dto.UpstreamPriceSourceRequest{}
 	if err := c.ShouldBindJSON(&request); err != nil {

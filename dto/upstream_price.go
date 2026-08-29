@@ -209,6 +209,16 @@ type UpstreamCurrentPriceResponse struct {
 	Alerts      []UpstreamPriceAlert        `json:"alerts"`
 }
 
+// UpstreamPriceSourceAlertsResponse carries the source-level catalog health
+// alerts on their own, without the catalog projection that
+// UpstreamCurrentPriceResponse builds around them. The list is flat because
+// every source-level alert already names its source, and GeneratedAt is the
+// instant the staleness alerts were judged against.
+type UpstreamPriceSourceAlertsResponse struct {
+	GeneratedAt int64                `json:"generated_at"`
+	Alerts      []UpstreamPriceAlert `json:"alerts"`
+}
+
 // UpstreamPriceAlertParams carries the structured values behind an alert's
 // Detail string so the admin UI can render a localized message instead of
 // displaying the English sentence. Detail keeps its existing content and
