@@ -87,8 +87,11 @@ func (a *CuratedReferenceAdapter) AllowedScopes() []upstreamprice.PriceScope {
 }
 
 func (a *CuratedReferenceAdapter) Supports(source upstreamprice.SourceConfig) bool {
-	// Reference sources must never be attributed to a channel (spec §6.3).
-	return source.AdapterKey == a.key && source.ChannelId == nil
+	// Identity only. Reference sources must never be attributed to a channel
+	// (spec §6.3), but that is the role×channel rule enforced once in
+	// upstreamprice.ValidatePriceSourceForWrite; repeating it here would make
+	// the adapter a second authority that can drift away from it.
+	return source.AdapterKey == a.key
 }
 
 func (a *CuratedReferenceAdapter) Endpoint() string {

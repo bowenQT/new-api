@@ -49,7 +49,6 @@ const VERCEL: PriceAdapterView = {
   key: 'vercel_gateway',
   allowed_roles: ['supplier_cost'],
   allowed_scopes: ['public'],
-  requires_channel: true,
   endpoint: 'https://ai-gateway.vercel.sh/v1/models',
 }
 
@@ -57,19 +56,17 @@ const MODELS_DEV: PriceAdapterView = {
   key: 'models_dev',
   allowed_roles: ['curated_reference'],
   allowed_scopes: ['unknown'],
-  requires_channel: false,
   endpoint: 'https://models.dev/api.json',
 }
 
 /**
- * An adapter that admits several roles while `requires_channel` stays false:
- * the channel field must then follow the selected role, not the flag.
+ * An adapter that admits several roles: the channel field must then follow the
+ * selected role, the only authority on the requirement.
  */
 const MIXED: PriceAdapterView = {
   key: 'mixed_feed',
   allowed_roles: ['supplier_cost', 'curated_reference'],
   allowed_scopes: ['public', 'contract'],
-  requires_channel: false,
   endpoint: 'https://example.invalid/prices.json',
 }
 

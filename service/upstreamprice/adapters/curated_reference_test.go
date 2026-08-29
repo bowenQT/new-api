@@ -68,19 +68,19 @@ func TestCuratedReferenceEndpointPinning(t *testing.T) {
 }
 
 // TestCuratedReferenceRoleScopeAndChannel pins spec §6.3 / §4.2: these sources
-// are curated references with an unprovable scope and must never be attached
-// to a channel.
+// are curated references with an unprovable scope, so curated_reference is the
+// only role they admit — and that role is what refuses a channel, in
+// ValidatePriceSourceForWrite. Supports answers adapter identity only, so it
+// does not re-decide the channel rule (a curated source can never be persisted
+// with a channel in the first place).
 func TestCuratedReferenceRoleScopeAndChannel(t *testing.T) {
 	adapter := NewModelsDevAdapter()
 	assert.Equal(t, []upstreamprice.PriceRole{upstreamprice.RoleCuratedReference}, adapter.AllowedRoles())
 	assert.Equal(t, []upstreamprice.PriceScope{upstreamprice.ScopeUnknown}, adapter.AllowedScopes())
 
 	assert.True(t, adapter.Supports(curatedReferenceSourceConfig(ModelsDevAdapterKey)))
-
-	withChannel := curatedReferenceSourceConfig(ModelsDevAdapterKey)
-	channelId := 7
-	withChannel.ChannelId = &channelId
-	assert.False(t, adapter.Supports(withChannel))
+	assert.False(t, adapter.Supports(curatedReferenceSourceConfig(BaseLLMAdapterKey)),
+		"an adapter must not serve another adapter's source")
 }
 
 // TestCuratedReferenceFetchNormalization is the parser contract against a

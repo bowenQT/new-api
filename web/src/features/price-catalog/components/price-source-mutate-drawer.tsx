@@ -146,10 +146,7 @@ export function PriceSourceMutateDrawer(props: Props) {
 
   const saveMutation = useMutation({
     mutationFn: async (values: PriceSourceFormValues) => {
-      const payload = formValuesToPriceSourcePayload(
-        values,
-        findPriceAdapter(adapters, values.adapter_key)
-      )
+      const payload = formValuesToPriceSourcePayload(values)
       const res = props.source
         ? await updatePriceSource(props.source.id, payload)
         : await createPriceSource(payload)
@@ -405,7 +402,7 @@ export function PriceSourceMutateDrawer(props: Props) {
                 </div>
               )}
 
-              {priceSourceUsesChannel(role, adapter) && (
+              {priceSourceUsesChannel(role) && (
                 <FormField
                   control={form.control}
                   name='channel_id'
