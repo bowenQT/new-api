@@ -166,7 +166,10 @@ export function PriceSourceSyncDialog(props: Props) {
 
   const items = preview?.items ?? []
   const shownItems = items.slice(0, PREVIEW_ITEM_LIMIT)
-  const commitBlocked = props.source.orphaned
+  // The server refuses to commit a sync for an orphaned or a disabled source
+  // (`checkSourceRunnableForCommit`), so the dialog refuses it too and states
+  // which of the two reasons applies. Preview stays available for diagnosis.
+  const commitBlocked = props.source.orphaned || !props.source.enabled
 
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
@@ -183,13 +186,25 @@ export function PriceSourceSyncDialog(props: Props) {
         </DialogHeader>
 
         <div className='space-y-4'>
-          {commitBlocked && (
+          {props.source.orphaned && (
             <Alert variant='destructive'>
               <TriangleAlert aria-hidden='true' />
               <AlertTitle>{t('Channel deleted (orphaned)')}</AlertTitle>
               <AlertDescription>
                 {t(
                   'This source points at a channel that no longer exists. Preview stays available for diagnosis, but committing a sync and scheduling are refused.'
+                )}
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {!props.source.enabled && (
+            <Alert variant='destructive'>
+              <TriangleAlert aria-hidden='true' />
+              <AlertTitle>{t('Source is disabled')}</AlertTitle>
+              <AlertDescription>
+                {t(
+                  'This source is disabled. Preview stays available for diagnosis, but the server refuses to commit a sync until the source is enabled again.'
                 )}
               </AlertDescription>
             </Alert>

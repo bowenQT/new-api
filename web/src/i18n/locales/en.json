@@ -5493,6 +5493,8 @@
     "Valid model coverage fell from {{previous}} to {{current}} models, past the {{gate}} drop gate.": "Valid model coverage fell from {{previous}} to {{current}} models, past the {{gate}} drop gate.",
     "The worst catalog cost exceeds the projected sale price for group {{group}}.": "The worst catalog cost exceeds the projected sale price for group {{group}}.",
     "The coverage gate refused run #{{runId}}. Valid model coverage would have fallen from {{previous}} to {{current}} models, past the {{gate}} drop gate, so nothing was written.": "The coverage gate refused run #{{runId}}. Valid model coverage would have fallen from {{previous}} to {{current}} models, past the {{gate}} drop gate, so nothing was written.",
-    "Unnormalized source pricing dimensions: {{dimensions}}": "Unnormalized source pricing dimensions: {{dimensions}}"
+    "Unnormalized source pricing dimensions: {{dimensions}}": "Unnormalized source pricing dimensions: {{dimensions}}",
+    "Source is disabled": "Source is disabled",
+    "This source is disabled. Preview stays available for diagnosis, but the server refuses to commit a sync until the source is enabled again.": "This source is disabled. Preview stays available for diagnosis, but the server refuses to commit a sync until the source is enabled again."
   }
 }

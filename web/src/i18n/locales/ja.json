@@ -5493,6 +5493,8 @@
     "Valid model coverage fell from {{previous}} to {{current}} models, past the {{gate}} drop gate.": "有効モデル数が {{previous}} から {{current}} へ減少し、{{gate}} の低下ゲートを超えました。",
     "The worst catalog cost exceeds the projected sale price for group {{group}}.": "グループ {{group}} で最悪ケースのコストが想定販売価格を上回っています。",
     "The coverage gate refused run #{{runId}}. Valid model coverage would have fallen from {{previous}} to {{current}} models, past the {{gate}} drop gate, so nothing was written.": "カバレッジゲートが実行 #{{runId}} を拒否しました。有効モデル数が {{previous}} から {{current}} へ減少し、{{gate}} の低下ゲートを超えるため、何も書き込まれていません。",
-    "Unnormalized source pricing dimensions: {{dimensions}}": "正規化されていないソースの価格次元: {{dimensions}}"
+    "Unnormalized source pricing dimensions: {{dimensions}}": "正規化されていないソースの価格次元: {{dimensions}}",
+    "Source is disabled": "ソースは無効です",
+    "This source is disabled. Preview stays available for diagnosis, but the server refuses to commit a sync until the source is enabled again.": "このソースは無効になっています。診断用のプレビューは利用できますが、再度有効にするまでサーバーは同期のコミットを拒否します。"
   }
 }

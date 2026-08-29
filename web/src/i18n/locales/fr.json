@@ -5493,6 +5493,8 @@
     "Valid model coverage fell from {{previous}} to {{current}} models, past the {{gate}} drop gate.": "La couverture des modèles valides est passée de {{previous}} à {{current}}, au-delà du seuil de baisse de {{gate}}.",
     "The worst catalog cost exceeds the projected sale price for group {{group}}.": "Le pire coût du catalogue dépasse le prix de vente projeté pour le groupe {{group}}.",
     "The coverage gate refused run #{{runId}}. Valid model coverage would have fallen from {{previous}} to {{current}} models, past the {{gate}} drop gate, so nothing was written.": "Le seuil de couverture a refusé l'exécution n° {{runId}}. La couverture des modèles valides serait passée de {{previous}} à {{current}}, au-delà du seuil de baisse de {{gate}}, donc rien n'a été écrit.",
-    "Unnormalized source pricing dimensions: {{dimensions}}": "Dimensions tarifaires de la source non normalisées : {{dimensions}}"
+    "Unnormalized source pricing dimensions: {{dimensions}}": "Dimensions tarifaires de la source non normalisées : {{dimensions}}",
+    "Source is disabled": "Source désactivée",
+    "This source is disabled. Preview stays available for diagnosis, but the server refuses to commit a sync until the source is enabled again.": "Cette source est désactivée. L'aperçu reste disponible pour le diagnostic, mais le serveur refuse de valider une synchronisation tant qu'elle n'est pas réactivée."
   }
 }

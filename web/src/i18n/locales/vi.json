@@ -5493,6 +5493,8 @@
     "Valid model coverage fell from {{previous}} to {{current}} models, past the {{gate}} drop gate.": "Độ phủ mô hình hợp lệ đã giảm từ {{previous}} xuống {{current}}, vượt ngưỡng giảm {{gate}}.",
     "The worst catalog cost exceeds the projected sale price for group {{group}}.": "Chi phí xấu nhất trong danh mục vượt giá bán dự kiến cho nhóm {{group}}.",
     "The coverage gate refused run #{{runId}}. Valid model coverage would have fallen from {{previous}} to {{current}} models, past the {{gate}} drop gate, so nothing was written.": "Cổng độ phủ đã từ chối lần chạy #{{runId}}. Độ phủ mô hình hợp lệ sẽ giảm từ {{previous}} xuống {{current}}, vượt ngưỡng giảm {{gate}}, nên không có dữ liệu nào được ghi.",
-    "Unnormalized source pricing dimensions: {{dimensions}}": "Chiều giá của nguồn chưa được chuẩn hóa: {{dimensions}}"
+    "Unnormalized source pricing dimensions: {{dimensions}}": "Chiều giá của nguồn chưa được chuẩn hóa: {{dimensions}}",
+    "Source is disabled": "Nguồn đã bị tắt",
+    "This source is disabled. Preview stays available for diagnosis, but the server refuses to commit a sync until the source is enabled again.": "Nguồn này đã bị tắt. Bản xem trước vẫn dùng được để chẩn đoán, nhưng máy chủ sẽ từ chối ghi nhận đồng bộ cho đến khi nguồn được bật lại."
   }
 }

@@ -5493,6 +5493,8 @@
     "Valid model coverage fell from {{previous}} to {{current}} models, past the {{gate}} drop gate.": "有效模型覆盖数从 {{previous}} 降至 {{current}}，超过 {{gate}} 的下降门禁。",
     "The worst catalog cost exceeds the projected sale price for group {{group}}.": "分组 {{group}} 的最差成本已超过其预估售价。",
     "The coverage gate refused run #{{runId}}. Valid model coverage would have fallen from {{previous}} to {{current}} models, past the {{gate}} drop gate, so nothing was written.": "覆盖率门禁拒绝了运行 #{{runId}}。有效模型覆盖数将从 {{previous}} 降至 {{current}}，超过 {{gate}} 的下降门禁，因此本次未写入任何数据。",
-    "Unnormalized source pricing dimensions: {{dimensions}}": "来源含未归一化的价格维度：{{dimensions}}"
+    "Unnormalized source pricing dimensions: {{dimensions}}": "来源含未归一化的价格维度：{{dimensions}}",
+    "Source is disabled": "来源已禁用",
+    "This source is disabled. Preview stays available for diagnosis, but the server refuses to commit a sync until the source is enabled again.": "该来源已禁用。预览仍可用于排查，但在重新启用之前，服务端会拒绝提交同步。"
   }
 }

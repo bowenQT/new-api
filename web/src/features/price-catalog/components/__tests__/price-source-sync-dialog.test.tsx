@@ -100,7 +100,10 @@ const committedRun: PriceSyncResponse = {
   idempotent_hit_count: 1,
 }
 
-function renderDialog(onSynced: () => void = () => undefined) {
+function renderDialog(
+  onSynced: () => void = () => undefined,
+  sourceOverrides: Partial<PriceSourceView> = {}
+) {
   queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
@@ -109,7 +112,7 @@ function renderDialog(onSynced: () => void = () => undefined) {
       <PriceSourceSyncDialog
         open
         onOpenChange={() => undefined}
-        source={source}
+        source={{ ...source, ...sourceOverrides }}
         onSynced={onSynced}
       />
     </QueryClientProvider>
@@ -369,6 +372,28 @@ describe('price source sync dialog', () => {
     expect(
       screen.queryByText('The sync run failed and nothing was written')
     ).toBeNull()
+  })
+
+  // The server refuses a commit for a disabled source, so the dialog must not
+  // offer the button that would produce that error.
+  test('refuses the commit for a disabled source while keeping the preview', async () => {
+    apiClient.post = async () => ({ data: { success: true, data: preview } })
+
+    renderDialog(() => undefined, { enabled: false })
+
+    expect(screen.getByText('Source is disabled')).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        'This source is disabled. Preview stays available for diagnosis, but the server refuses to commit a sync until the source is enabled again.'
+      )
+    ).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run preview' }))
+
+    expect(await screen.findByText('gpt-4o')).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Confirm and sync' })
+    ).toBeDisabled()
   })
 
   test('keeps the commit unavailable when the preview failed', async () => {
