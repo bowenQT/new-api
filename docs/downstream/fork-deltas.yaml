@@ -370,6 +370,7 @@ entries:
       - web/src/features/price-catalog/components/price-source-mutate-drawer.tsx
       - web/src/features/price-catalog/components/price-source-sync-dialog.tsx
       - web/src/features/price-catalog/components/price-sources-panel.tsx
+      - web/src/features/price-catalog/components/__tests__/catalog-alerts.test.tsx
       - web/src/features/price-catalog/components/__tests__/price-compare-panel.test.tsx
       - web/src/features/price-catalog/components/__tests__/price-compare-table.test.tsx
       - web/src/features/price-catalog/components/__tests__/price-source-mutate-drawer.test.tsx
@@ -377,6 +378,7 @@ entries:
       - web/src/features/price-catalog/components/__tests__/price-sources-panel.test.tsx
       - web/src/features/price-catalog/constants.ts
       - web/src/features/price-catalog/index.tsx
+      - web/src/features/price-catalog/lib/alert-detail.ts
       - web/src/features/price-catalog/lib/compare-format.ts
       - web/src/features/price-catalog/lib/source-form.ts
       - web/src/features/price-catalog/section-registry.tsx
