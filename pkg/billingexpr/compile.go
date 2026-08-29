@@ -47,13 +47,8 @@ func (p *requestRulePatcher) Visit(node *ast.Node) {
 		return
 	}
 
-	conditional, ok := (*node).(*ast.ConditionalNode)
-	if !ok || !conditional.Ternary || !usesRequestProbe(conditional.Cond) {
-		return
-	}
-	multiplier, ok := requestRuleNumber(conditional.Exp1)
-	fallback, fallbackOK := requestRuleNumber(conditional.Exp2)
-	if !ok || !fallbackOK || fallback != 1 {
+	conditional, multiplier, ok := requestRuleFactor(*node)
+	if !ok {
 		return
 	}
 
@@ -65,11 +60,9 @@ func (p *requestRulePatcher) Visit(node *ast.Node) {
 
 	traceFunction := requestRuleTraceFunction
 	var multiplierNode ast.Node = &ast.FloatNode{Value: multiplier}
-	if _, multiplierIsInt := conditional.Exp1.(*ast.IntegerNode); multiplierIsInt {
-		if _, fallbackIsInt := conditional.Exp2.(*ast.IntegerNode); fallbackIsInt {
-			traceFunction = requestRuleTraceIntFunction
-			multiplierNode = conditional.Exp1
-		}
+	if requestRuleFactorIsInteger(conditional) {
+		traceFunction = requestRuleTraceIntFunction
+		multiplierNode = conditional.Exp1
 	}
 
 	ast.Patch(node, &ast.CallNode{
@@ -80,6 +73,35 @@ func (p *requestRulePatcher) Visit(node *ast.Node) {
 			multiplierNode,
 		},
 	})
+}
+
+// requestRuleFactor reports whether a node is a request-conditional multiplier
+// of the exact instrumented shape `<request-probe condition> ? <numeric
+// literal> : 1`. It is the single definition of that shape, shared by the
+// tracing patcher and the base-expression projection patcher, so the two can
+// never disagree about which factors are neutralizable.
+func requestRuleFactor(node ast.Node) (*ast.ConditionalNode, float64, bool) {
+	conditional, ok := node.(*ast.ConditionalNode)
+	if !ok || !conditional.Ternary || !usesRequestProbe(conditional.Cond) {
+		return nil, 0, false
+	}
+	multiplier, multiplierOK := requestRuleNumber(conditional.Exp1)
+	fallback, fallbackOK := requestRuleNumber(conditional.Exp2)
+	if !multiplierOK || !fallbackOK || fallback != 1 {
+		return nil, 0, false
+	}
+	return conditional, multiplier, true
+}
+
+// requestRuleFactorIsInteger reports whether both branches of an instrumented
+// factor are integer literals, which requires an integer-preserving
+// replacement so operators such as `%` keep a valid operand.
+func requestRuleFactorIsInteger(conditional *ast.ConditionalNode) bool {
+	if _, multiplierIsInt := conditional.Exp1.(*ast.IntegerNode); !multiplierIsInt {
+		return false
+	}
+	_, fallbackIsInt := conditional.Exp2.(*ast.IntegerNode)
+	return fallbackIsInt
 }
 
 func requestRuleNumber(node ast.Node) (float64, bool) {
@@ -271,10 +293,15 @@ func UsedVars(exprStr string) map[string]bool {
 	return nil
 }
 
-// InvalidateCache clears the compiled-expression cache.
+// InvalidateCache clears the compiled-expression caches, both the billing
+// programs and the base-expression projection programs.
 // Called when billing rules are updated.
 func InvalidateCache() {
 	cacheMu.Lock()
 	cache = make(map[string]*cachedEntry, 64)
 	cacheMu.Unlock()
+
+	projectionMu.Lock()
+	projectionCache = make(map[string]*projectionEntry, 32)
+	projectionMu.Unlock()
 }

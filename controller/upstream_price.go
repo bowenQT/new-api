@@ -17,6 +17,13 @@ import (
 // and never touch sale-pricing configuration; vendor parsing lives in the
 // adapter registry, not here.
 
+// GetUpstreamPriceAdapters lists the registered adapters with the roles,
+// scopes, channel requirement, and pinned endpoint each one accepts, so the
+// admin UI configures sources from the registry rather than a hardcoded copy.
+func GetUpstreamPriceAdapters(c *gin.Context) {
+	common.ApiSuccess(c, upstreamprice.ListAdapters())
+}
+
 func GetUpstreamPriceSources(c *gin.Context) {
 	views, err := upstreamprice.ListPriceSources()
 	if err != nil {
@@ -112,4 +119,20 @@ func GetCurrentUpstreamPrices(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, catalog)
+}
+
+// CompareUpstreamPrices returns the estimate-only cost / sale price / margin
+// comparison (spec §9.2, §10.3). It writes no state.
+func CompareUpstreamPrices(c *gin.Context) {
+	request := dto.UpstreamPriceCompareRequest{}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	comparison, err := upstreamprice.CompareUpstreamPrices(&request)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, comparison)
 }

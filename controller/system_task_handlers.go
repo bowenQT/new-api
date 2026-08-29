@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/service/upstreamprice"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 )
 
@@ -22,6 +23,34 @@ func RegisterScheduledSystemTasks() {
 	service.RegisterSystemTaskHandler(modelUpdateHandler{})
 	service.RegisterSystemTaskHandler(midjourneyPollHandler{})
 	service.RegisterSystemTaskHandler(asyncTaskPollHandler{})
+	service.RegisterSystemTaskHandler(upstreamPriceSyncHandler{})
+}
+
+// upstreamPriceSyncHandler runs the upstream price catalog's scheduled sync as
+// one task type (spec §8.4). Enabled() folds in the deployment switch, which
+// defaults to off, and the existence of at least one scheduled source, so an
+// unconfigured deployment never creates a row. Due sources are selected inside
+// the run by their own schedule_interval_seconds.
+type upstreamPriceSyncHandler struct{}
+
+func (upstreamPriceSyncHandler) Type() string { return model.SystemTaskTypeUpstreamPriceSync }
+
+func (upstreamPriceSyncHandler) Enabled() bool { return upstreamprice.ScheduledSyncEnabled() }
+
+func (upstreamPriceSyncHandler) Interval() time.Duration { return upstreamprice.ScheduleWakeInterval }
+
+func (upstreamPriceSyncHandler) NewPayload() any { return nil }
+
+func (upstreamPriceSyncHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
+	// A pass in which any due source failed — including a run a gate refused
+	// without returning an error — or which hit the overall timeout finishes
+	// the task as failed, with the summary still recorded as its result.
+	summary, err := upstreamprice.RunScheduledSync(ctx, service.NewSystemTaskProgressReporter(task, runnerID))
+	if err != nil {
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, summary, err)
+		return
+	}
+	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, summary, nil)
 }
 
 // channelTestHandler runs the scheduled "test all channels" job. Enablement and

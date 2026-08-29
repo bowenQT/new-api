@@ -652,12 +652,7 @@ func SyncPriceSource(ctx context.Context, sourceId int, previewToken string) (*d
 	if err != nil {
 		return nil, err
 	}
-	if !source.Enabled {
-		return nil, errors.New("price source is disabled; commit refused")
-	}
-	// Fast fail before fetching; the authoritative orphan/disabled check runs
-	// again inside the commit transaction under the row lock.
-	if err := checkSupplierChannelForCommit(source); err != nil {
+	if err := checkSourceRunnableForCommit(source); err != nil {
 		return nil, err
 	}
 
@@ -677,14 +672,7 @@ func SyncPriceSource(ctx context.Context, sourceId int, previewToken string) (*d
 
 	plan, planErr := buildSyncPlan(ctx, source)
 	if planErr != nil {
-		if plan != nil {
-			recordRun := buildRunFromPlan(plan, planErr.Error())
-			if _, recordErr := model.RecordFailedPriceSyncRun(source.Id, recordRun); recordErr != nil {
-				return nil, fmt.Errorf("fetch failed (%v) and failed run could not be recorded: %w", planErr, recordErr)
-			}
-			return nil, planErr
-		}
-		return nil, planErr
+		return nil, recordSyncPlanFailure(ctx, source, plan, planErr)
 	}
 	if !intPtrEqual(claim.BaseRunId, plan.BaseRunId) {
 		return nil, model.ErrPriceSyncConflict
@@ -700,6 +688,110 @@ func SyncPriceSource(ctx context.Context, sourceId int, previewToken string) (*d
 		return nil, errors.New("source content changed since preview, re-preview required")
 	}
 
+	return commitSyncPlan(ctx, source, plan, claim.ConfigRevision, claim.BaseRunId)
+}
+
+// SyncPriceSourceWithoutPreview is the unattended commit path used by the
+// scheduled task (spec §8.4). There is no human preview, but the fetch,
+// normalization, validation, and coverage/change gates are identical, and the
+// same CAS-guarded commit transaction writes the result. It never touches sale
+// pricing.
+//
+// Every failure on this path is recorded, including the ones that produce no
+// plan: a refused preflight, an unusable adapter or settings, a base-state read
+// error, and a commit transaction that rolled back. The scheduler backs off by
+// the source's own interval from the last attempt, so a failure that left no
+// timestamp would make the source retry on every wake (spec §8.4). The manual
+// preview/commit path deliberately keeps its existing semantics and stamps
+// nothing for a refusal that never ran.
+//
+// The one scheduled failure that is neither stamped nor recorded is a CAS
+// conflict: it means an admin changed the source configuration while this fetch
+// was running, so nothing about the new configuration failed.
+func SyncPriceSourceWithoutPreview(ctx context.Context, source *model.PriceSource) (*dto.UpstreamPriceSyncResponse, error) {
+	if err := checkSourceRunnableForCommit(source); err != nil {
+		return nil, recordScheduledAttemptFailure(ctx, source, err)
+	}
+	plan, planErr := buildSyncPlan(ctx, source)
+	if planErr != nil {
+		if plan == nil {
+			return nil, recordScheduledAttemptFailure(ctx, source, planErr)
+		}
+		return nil, recordSyncPlanFailure(ctx, source, plan, planErr)
+	}
+	response, commitErr := commitSyncPlan(ctx, source, plan, plan.Source.ConfigRevision, plan.BaseRunId)
+	if commitErr != nil {
+		if errors.Is(commitErr, model.ErrPriceSyncConflict) {
+			// The source configuration changed while this fetch was running, so
+			// the CAS refused a commit computed under the superseded
+			// configuration. Backing the source off here would delay the new
+			// configuration's first real sync by a full interval, and counting a
+			// consecutive failure would blame the new configuration for a
+			// conflict it did not cause. The next wake re-plans under the
+			// current configuration and its CAS passes, so this cannot loop.
+			return nil, commitErr
+		}
+		return nil, recordScheduledAttemptFailure(ctx, source, commitErr)
+	}
+	return response, nil
+}
+
+// recordScheduledAttemptFailure records a scheduled attempt that failed before
+// any plan existed and returns the original cause.
+//
+// It writes a lightweight failed run carrying no items. That run is what makes
+// the attempt visible: a pre-plan failure — a disabled channel, an unavailable
+// adapter, corrupt settings — used to update only last_error_at, so a source
+// failing this way forever never reached the consecutive-failure alert, which
+// counts failed run rows (spec §13). The run write stamps the backoff timestamp
+// as part of the same transaction; if it cannot be written, the timestamp is
+// still stamped on its own, because the scheduler's due check depends on it.
+func recordScheduledAttemptFailure(ctx context.Context, source *model.PriceSource, cause error) error {
+	run := model.PriceSyncRun{
+		Status:               model.PriceSyncRunStatusFailed,
+		AdapterKey:           source.AdapterKey,
+		StartedAt:            common.GetTimestamp(),
+		SourceConfigRevision: source.ConfigRevision,
+		ErrorSummary:         cause.Error(),
+	}
+	if _, err := model.RecordFailedPriceSyncRun(source.Id, run); err != nil {
+		common.SysError(fmt.Sprintf("upstream price source %d failure run could not be recorded: %v", source.Id, err))
+		if stampErr := model.RecordPriceSourceFailure(source.Id, cause.Error()); stampErr != nil {
+			common.SysError(fmt.Sprintf("upstream price source %d failure timestamp could not be recorded: %v", source.Id, stampErr))
+		}
+		return cause
+	}
+	LogCatalogAlertsAfterWrite(ctx, source.Id, nil)
+	return cause
+}
+
+// checkSourceRunnableForCommit is the pre-fetch gate shared by the manual and
+// the scheduled commit paths. The authoritative orphan/disabled check runs
+// again inside the commit transaction under the row lock.
+func checkSourceRunnableForCommit(source *model.PriceSource) error {
+	if !source.Enabled {
+		return errors.New("price source is disabled; commit refused")
+	}
+	return checkSupplierChannelForCommit(source)
+}
+
+// recordSyncPlanFailure persists a failed run for a fetch that never produced
+// a plan result, then returns the original failure.
+func recordSyncPlanFailure(ctx context.Context, source *model.PriceSource, plan *syncPlan, planErr error) error {
+	if plan == nil {
+		return planErr
+	}
+	recordRun := buildRunFromPlan(plan, planErr.Error())
+	if _, recordErr := model.RecordFailedPriceSyncRun(source.Id, recordRun); recordErr != nil {
+		return fmt.Errorf("fetch failed (%v) and failed run could not be recorded: %w", planErr, recordErr)
+	}
+	LogCatalogAlertsAfterWrite(ctx, source.Id, nil)
+	return planErr
+}
+
+// commitSyncPlan writes one prepared plan through the CAS-guarded commit
+// transaction and summarizes the resulting run.
+func commitSyncPlan(ctx context.Context, source *model.PriceSource, plan *syncPlan, expectedConfigRevision int64, expectedBaseRunId *int) (*dto.UpstreamPriceSyncResponse, error) {
 	errorSummary := ""
 	if plan.Status == model.PriceSyncRunStatusFailed {
 		if plan.ValidCount == 0 {
@@ -710,8 +802,8 @@ func SyncPriceSource(ctx context.Context, sourceId int, previewToken string) (*d
 	}
 	commit := &model.PriceSyncCommit{
 		SourceId:               source.Id,
-		ExpectedConfigRevision: claim.ConfigRevision,
-		ExpectedBaseRunId:      claim.BaseRunId,
+		ExpectedConfigRevision: expectedConfigRevision,
+		ExpectedBaseRunId:      expectedBaseRunId,
 		Run:                    buildRunFromPlan(plan, errorSummary),
 		Items:                  buildCommitItems(plan),
 	}
@@ -719,6 +811,9 @@ func SyncPriceSource(ctx context.Context, sourceId int, previewToken string) (*d
 	if err != nil {
 		return nil, err
 	}
+	// A run that persisted snapshots changed the current cost of the models it
+	// made valid, so those are the models whose cost inversion is re-checked.
+	LogCatalogAlertsAfterWrite(ctx, source.Id, committedCanonicalModels(plan, run.Status))
 	return &dto.UpstreamPriceSyncResponse{
 		RunId:              run.Id,
 		Status:             run.Status,
@@ -733,7 +828,31 @@ func SyncPriceSource(ctx context.Context, sourceId int, previewToken string) (*d
 	}, nil
 }
 
+// committedCanonicalModels lists, in sorted order, the canonical model names a
+// committed run made current. A run that persisted no snapshots returns none.
+func committedCanonicalModels(plan *syncPlan, runStatus string) []string {
+	if runStatus != model.PriceSyncRunStatusSucceeded && runStatus != model.PriceSyncRunStatusPartial {
+		return nil
+	}
+	seen := make(map[string]bool, len(plan.Items))
+	names := make([]string, 0, len(plan.Items))
+	for _, item := range plan.Items {
+		if item.Status != model.PriceSyncItemStatusValid || item.Price == nil {
+			continue
+		}
+		name := item.Price.CanonicalModelName
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 func buildRunFromPlan(plan *syncPlan, errorSummary string) model.PriceSyncRun {
+	coverageDropExceeded := plan.CoverageDropExceeded
 	return model.PriceSyncRun{
 		Status:     plan.Status,
 		AdapterKey: plan.AdapterKey,
@@ -752,6 +871,7 @@ func buildRunFromPlan(plan *syncPlan, errorSummary string) model.PriceSyncRun {
 		RejectedCount:        plan.RejectedCount,
 		MissingCount:         len(plan.Missing),
 		ErrorSummary:         errorSummary,
+		CoverageDropExceeded: &coverageDropExceeded,
 	}
 }
 
@@ -825,6 +945,25 @@ func sourceConfigDigest(config SourceConfig) string {
 	}
 	digest := sha256.Sum256(data)
 	return hex.EncodeToString(digest[:])
+}
+
+// priceSourceConfigChanged reports whether the source configuration a run
+// actually executed under still matches the source's current configuration
+// (spec §7.3, §9.2). Only the price-semantic fields participate, because
+// sourceConfigDigest covers adapter_key, role, scope, channel_id, and the
+// non-secret settings and nothing else: toggling enabled, schedule_enabled, or
+// schedule_interval_seconds does not invalidate an observation, while pointing
+// the source at a different channel or adapter does.
+//
+// A run without a digest is treated as changed. The catalog and comparison
+// paths fail closed on the answer — a cost whose configuration moved is never
+// reported as a confirmed current cost — so "unknown" must not read as "still
+// valid".
+func priceSourceConfigChanged(config SourceConfig, run *model.PriceSyncRun) bool {
+	if run == nil {
+		return true
+	}
+	return run.SourceConfigDigest != sourceConfigDigest(config)
 }
 
 // checkSupplierChannelForCommit is the pre-transaction fast fail for commit:

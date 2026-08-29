@@ -133,7 +133,8 @@ func TestSourceRoleChannelConstraints(t *testing.T) {
 	})
 	require.Error(t, err)
 
-	// Phase 1 refuses enabling background scheduling.
+	// Background scheduling requires an interval of at least six hours
+	// (spec §8.4); enabling it without one is refused.
 	enabled := true
 	_, err = upstreamprice.CreatePriceSource(&dto.UpstreamPriceSourceRequest{
 		Name:            "scheduled",
@@ -144,7 +145,20 @@ func TestSourceRoleChannelConstraints(t *testing.T) {
 		ScheduleEnabled: &enabled,
 	})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "Phase 1")
+	assert.Contains(t, err.Error(), "scheduled sync requires")
+
+	interval := upstreamprice.MinScheduleIntervalSeconds
+	scheduled, err := upstreamprice.CreatePriceSource(&dto.UpstreamPriceSourceRequest{
+		Name:                    "scheduled",
+		AdapterKey:              adapterKey,
+		Role:                    string(upstreamprice.RoleSupplierCost),
+		Scope:                   string(upstreamprice.ScopePublic),
+		ChannelId:               &channel.Id,
+		ScheduleEnabled:         &enabled,
+		ScheduleIntervalSeconds: &interval,
+	})
+	require.NoError(t, err)
+	assert.True(t, scheduled.ScheduleEnabled)
 }
 
 func TestPreviewDoesNotPersistAnything(t *testing.T) {
@@ -276,14 +290,19 @@ func TestSyncRejectsTamperedAndForeignTokens(t *testing.T) {
 	preview, err := upstreamprice.PreviewPriceSource(context.Background(), source.Id)
 	require.NoError(t, err)
 
-	// Tampered token: flip one character of the signature.
+	// Tampered token: flip the first character of the signature. The last
+	// base64 character of a 32-byte raw-URL signature carries padding bits the
+	// decoder ignores, so flipping it can decode to the same bytes; the first
+	// character always changes the signature.
 	token := preview.PreviewToken
-	tampered := token[:len(token)-1]
-	if token[len(token)-1] == 'A' {
-		tampered += "B"
-	} else {
-		tampered += "A"
+	dot := strings.IndexByte(token, '.')
+	require.Positive(t, dot)
+	require.Less(t, dot+1, len(token))
+	replacement := byte('A')
+	if token[dot+1] == 'A' {
+		replacement = 'B'
 	}
+	tampered := token[:dot+1] + string(replacement) + token[dot+2:]
 	_, err = upstreamprice.SyncPriceSource(context.Background(), source.Id, tampered)
 	require.Error(t, err)
 

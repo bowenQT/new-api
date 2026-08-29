@@ -25,6 +25,10 @@ const (
 	WarningExprValidationFailed  = "expr_validation_failed"
 	WarningDuplicateModel        = "duplicate_model"
 	WarningFieldTooLong          = "field_too_long"
+	// WarningTieredPricingUnsupported marks a source model whose tiered
+	// pricing changes the very dimensions Phase 2 normalizes, so recording
+	// only the base tier would understate the price.
+	WarningTieredPricingUnsupported = "tiered_pricing_unsupported"
 )
 
 // Structural length bounds enforced at validation time (defense in depth on
@@ -155,9 +159,9 @@ func ValidateNormalizedPrice(price *NormalizedPrice) (string, error) {
 	return "", nil
 }
 
-// Phase 1 keeps background scheduling disabled entirely (spec §17); the
-// minimum interval matches the spec recommendation for when Phase 2 enables
-// it, so stored configurations stay valid.
+// MinScheduleIntervalSeconds is the shortest per-source scheduling interval
+// (spec §8.4): public price endpoints must not be polled more than once every
+// six hours.
 const MinScheduleIntervalSeconds = int64(6 * 60 * 60)
 
 // ValidatePriceSourceForWrite is the authoritative service-layer validation of
@@ -213,11 +217,11 @@ func ValidatePriceSourceForWrite(source *model.PriceSource) error {
 		return fmt.Errorf("adapter %q does not support this source configuration", source.AdapterKey)
 	}
 
-	if source.ScheduleEnabled {
-		return errors.New("scheduled sync is not available in Phase 1")
-	}
 	if source.ScheduleIntervalSeconds != 0 && source.ScheduleIntervalSeconds < MinScheduleIntervalSeconds {
 		return fmt.Errorf("schedule_interval_seconds must be at least %d", MinScheduleIntervalSeconds)
+	}
+	if source.ScheduleEnabled && source.ScheduleIntervalSeconds < MinScheduleIntervalSeconds {
+		return fmt.Errorf("scheduled sync requires schedule_interval_seconds of at least %d", MinScheduleIntervalSeconds)
 	}
 
 	if role == RoleSupplierCost {

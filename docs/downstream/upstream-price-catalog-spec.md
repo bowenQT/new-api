@@ -2,7 +2,7 @@
 
 ## 文档状态
 
-- 状态：Draft rev4，Codex 两轮评审完成（第二轮 4 MAJOR / 4 MINOR 全部采纳），进入 Phase 1 实施
+- 状态：Draft rev5，Phase 1 已实施并合并；Phase 2 后端（投影 API、比较接口、定时同步、告警、curated reference 适配器）已实施，Phase 2 前端未开始
 - 日期：2026-08-28
 - 适用分支基线：`downstream/main@7f7f006af8e5fdb027865d05107e93a267ece46e`
 - 风险等级：S3（计费域设计；本文档本身不修改计费、数据库或生产配置）
@@ -267,6 +267,13 @@ Vercel adapter 必须：
 1. OpenRouter：渠道成本或公开路由价格。
 2. 厂商官方机器可读价：`vendor_list`。首版不做，待有厂商官方机器可读源再立项。
 3. basellm / models.dev：`curated_reference`，不能标成厂商官方；UI 必须标注非官方。Phase 2 接入。
+   实施结论（Phase 2 实测）：两者均有稳定、免鉴权的机器可读端点，范围未缩小。
+   models.dev 为 `https://models.dev/api.json`（约 4.4 MB，带 ETag，README 中有 API 说明）；
+   basellm 为 `https://basellm.github.io/llm-metadata/api/all.json`（约 0.5 MB，是 models.dev 的过滤派生集）。
+   两者 payload 形状一致（provider → models → `cost`，系数单位为 USD/1M tokens），共用同一解析器。
+   归一化范围限定为 `input`/`output`/`cache_read`/`cache_write` 的 flat 价格：模型 `cost` 含
+   `tiers` 或 `context_over_200k` 时整条记为 unsupported（只记基础档会低报长上下文价格），
+   其余未支持维度进 metadata warning，不猜测。价格按源 JSON 原文走十进制校验，指数形式一律拒绝。
 4. 人工合同价：`supplier_cost + contract`，必须有独立权限和审计。不进首版，后续独立立项。
 
 ## 7. 数据模型
@@ -367,6 +374,7 @@ Vercel adapter 必须：
 | `new_snapshot_count` | int | 新增快照数 |
 | `idempotent_hit_count` | int | 幂等命中数 |
 | `error_summary` | varchar(255) | 脱敏错误摘要 |
+| `coverage_drop_exceeded` | nullable bool | 本次 run 是否被覆盖率门禁拒绝；告警据此判定，不解析 `error_summary`。可空以兼容该列存在前写入的旧行（`nil` 按「不是门禁拒绝」处理），且不声明布尔默认值，避免 AutoMigrate 在 MySQL/PostgreSQL 上反复 ALTER |
 
 每个 run 同时写入条目明细 `PriceSyncRunItem`：
 
@@ -460,6 +468,33 @@ preview DTO 摘要（新增/变化/rejected/unsupported/missing 清单与覆盖�
 - 单次任务按来源串行或有限并发执行，设置总超时和单来源超时。
 - 调度任务没有任何销售价写权限路径。
 
+Phase 2 实施口径：
+
+- 部署级开关为环境变量 `UPSTREAM_PRICE_SYNC_TASK_ENABLED`，默认 `false`；任务 `Enabled()` 同时要求至少存在一个 `enabled` 且 `schedule_enabled` 的来源，未配置的部署不会产生任何任务行。
+- 唤醒周期 15 分钟，远短于来源级 6 小时下限，使来源贴近自身间隔执行。
+- 6 小时下限在写入校验（启用调度时 `schedule_interval_seconds` 必须 ≥ 21600）与到期筛选两处同时强制。
+- 到期基准取最近一次尝试（成功或失败）时间，失败来源退避一个完整间隔，不在下次唤醒重试。手工 preview/commit 路径语义不变，校验失败不写时间戳。
+- 调度结果分类以 run status 为准，不以「是否返回 error」为准：`failed` run（零有效观测、覆盖率门禁拒绝）不返回 error 但没有提交任何观测，一律计入 `failed`；`partial` 已提交有效观测，计入 `succeeded` 并在 summary 中单列 `partial` 计数。任一来源 `failed` 或整次任务超时（`timed_out=true`），`upstream_price_sync` 的 SystemTask 一律收尾为 `failed`，summary 仍作为任务 result 记录；orphan 跳过不算失败。
+- 单来源超时 3 分钟，整次任务超时 30 分钟；orphan 来源拒绝执行，Preview 仍可用于诊断。
+- 无人工 Preview，但复用同一条 commit 路径：同样的抓取、归一化、验证、覆盖率与变化门禁，以及同一个 CAS 事务。
+
+调度失败统一语义（三个维度必须一起判定，不允许分叉）：
+
+| 失败类别 | 写 `last_error_at` 退避 | 计入连续失败告警 | 使本次任务失败 | summary 计数 |
+| --- | --- | --- | --- | --- |
+| plan 前失败（渠道禁用、adapter 不可用、settings 损坏、base state 读失败） | 是 | 是 | 是 | `Failed` |
+| orphan 检查返回数据库错误 | 是 | 是 | 是 | `Failed` |
+| 抓取失败（HTTP/解析） | 是 | 是 | 是 | `Failed` |
+| 门禁拒绝（零有效观测、覆盖率下降） | 是 | 是 | 是 | `Failed` |
+| commit 事务回滚（非 CAS 冲突） | 是 | 是 | 是 | `Failed` |
+| commit CAS 冲突（`ErrPriceSyncConflict`，配置在抓取途中被改） | **否** | **否** | 是 | `Failed` |
+| 真 orphan（渠道确认已删除） | 否 | 否 | 否 | `Skipped` |
+| 整次任务超时后未处理的来源 | 否 | 否 | 是 | `Skipped` + `TimedOut` |
+
+- 「计入连续失败告警」的实现方式是：调度路径上每一次失败都落一条 run 行。plan 前失败落一条不带任何 run item 的轻量 `failed` run，它与退避时间戳在同一个事务里写入。这样 `source_consecutive_failures` 告警（按 failed run 行计数）不会漏掉从未进入 adapter 的失败；此前这类失败只更新 `last_error_at`，无论重复多少次都永不告警。轻量 run 不写 `source_config_digest`，只有成功 run 才参与 §9.2 的 digest 比较。
+- CAS 冲突是唯一既不退避也不落 run 的调度失败：它表示管理员在抓取途中改了来源配置，被拒的是**旧配置**下算出的提交，新配置本身没有失败。给新配置打退避时间戳会把它的首次真正同步推迟一整个间隔，计入连续失败则是把冲突算到新配置头上。下次唤醒会在当前配置下重新 plan 且 CAS 能通过，因此不会形成循环。该来源仍计入本次任务的 `Failed`，任务照常收尾为失败。
+- orphan 检查返回数据库错误不等于「渠道确认已删除」：来源既没有执行也没有被安全跳过，因此按普通失败处理（退避 + 落 run + 任务失败），只有确认删除的真 orphan 才是 `Skipped`。
+
 ## 9. 销售价与成本的关系
 
 ### 9.1 用户扣费公式保持不变
@@ -490,6 +525,7 @@ preview DTO 摘要（新增/变化/rejected/unsupported/missing 清单与覆盖�
 - 一个模型存在多个可路由渠道时，同时展示最低、最高和最差成本毛利。
 - 没有实际路由命中信息时只能称为“预估毛利”，不能称为真实利润。
 - 参考标价不参与成本毛利；它用于比较销售策略。
+- 配置变更 fail closed：只有 run 记录的实质来源配置与来源当前实质配置一致时，该观察值才算当前已确认成本。实质配置即 `source_config_digest` 覆盖的字段——`adapter_key`、`role`、`scope`、`channel_id` 与非密 `settings`；`enabled`、`schedule_enabled`、`schedule_interval_seconds` 不在其中，开关调度不会使成本失效。digest 不一致（含 run 没有 digest）时该来源成本 fail closed：不进最低/最高成本与毛利，置 `cost_confirmed=false`，并在 `/current` 与 compare 中标注 `source_config_changed`，同时触发 `source_config_changed` 告警；重新同步成功后自动恢复。
 - 汇率、充值折扣、支付手续费、税和退款不在首版计算范围内。
 
 ### 9.3 销售价投影契约
@@ -536,11 +572,16 @@ Phase 3 实施时不能照搬当前前端逐个 option 顺序写入的非原子�
 
 ```text
 GET    /api/upstream-price-sources
+GET    /api/upstream-price-sources/adapters
 POST   /api/upstream-price-sources
 PUT    /api/upstream-price-sources/:id
 ```
 
-三个接口均为 RootAuth。首版不提供硬删除；使用 `enabled=false`。
+四个接口均为 RootAuth。首版不提供硬删除；使用 `enabled=false`。
+
+`GET /api/upstream-price-sources/adapters` 返回注册表中每个 adapter 的 `key`、`allowed_roles`、`allowed_scopes`、`requires_channel` 与固定公开 `endpoint`，供管理界面按注册表构建来源表单，避免前端复制一份 adapter 清单后与后端漂移。该响应只含非敏感信息，绝不包含凭证（§12）。
+
+`GET /api/upstream-price-sources` 的每条记录另带上次成功 run 的聚合：`last_success_finished_at`、`coverage_count`（valid 模型数）、`missing_count` 与按 §8.3 阈值判定的 `stale`，使列表页无需为每个来源再查一次目录。
 
 ### 10.2 同步
 
@@ -560,6 +601,18 @@ POST /api/upstream-prices/compare
 ```
 
 三个接口均为 RootAuth。`compare` 接收模型、分组和 usage vector，返回各渠道成本、当前售价和预估毛利（投影口径与 fail closed 规则见 §9.3），不写状态。
+
+Phase 2 实施口径：
+
+- 分组默认 `default`，管理员可指定任意分组（§21 Q4 裁决）；分组未配置倍率时按 1 计算并在响应中标注 `group_ratio_configured=false`。
+- usage vector 缺省为 `p = c = 1,000,000`、`cr = cc = 0`，并在响应中原样回显，使金额口径始终显式。每个维度必须有限、非负且 ≤ 1e9。默认值是**整体缺省**，只在请求完全没有 `usage` 时生效：一旦请求给出 `usage`，它就描述了完整请求，未列出的维度按 0 计算，不保留任何默认值。否则 `{"usage":{"p":1000}}` 会按 100 万默认 completion token 计费投影，毛利严重失真。回显遵循同一语义。
+- 模型列表为空表示比较目录中全部 canonical 模型，按名称排序上限 500 条，超出时置 `truncated=true`。
+- 可选 `model_filter` 为 canonical 模型名的大小写不敏感子串（最长 255 字符），在 500 条上限**之前**过滤，因此目录超过上限时仍可检索到全部匹配项；`total_models` 为匹配总数，过滤后仍超过上限才置 `truncated=true`。匹配只作用于 canonical 模型名（比较行本身即以 canonical 名聚合），不匹配 `source_model_name`。显式 `models` 列表本身即已收窄集合，此时忽略 `model_filter`，`models` 语义不变。
+- 参与毛利的成本只取本次 `last_success_run` 的观察值（current 与 stale）；`missing`（上游已不再返回）不参与最低/最高与毛利。任一贡献成本为 stale、orphaned、canonical 冲突或 `varies_by_provider` 时置 `cost_confirmed=false`。
+- `source_config_changed`（run 的实质配置与来源当前实质配置不一致，判定口径见 §9.2）比 stale 更强：该成本 `usable_for_margin=false`，完全不进最低/最高与毛利，并置 `cost_confirmed=false`。`/current` 每条目录行同样回带 `source_config_changed`，两处共用同一判定，不允许分叉。
+- `curated_reference` 与 `vendor_list` 价格单独返回，不参与毛利。
+- 每条来源价格回带该观察值快照自身的 `fetched_at` 与 `effective_at`，使 §8.3 要求的时间标注无需再全量调用 `/current`；同时回带快照 metadata 中的 `unsupported_dimensions`（逗号分隔字符串，§6.2），使比较视图能说明该成本投影漏掉了来源实际计价的哪些维度。除这一项外，快照 metadata 不进入 compare 响应。
+- 响应携带 §9.3 的完整排除项清单与告警列表；所有金额有界，非有限值一律拒绝。
 
 ### 10.4 销售价候选
 
@@ -627,6 +680,16 @@ POST /api/upstream-prices/sale-candidate
 - 模型覆盖率下降超过阈值。
 - 任一普通销售分组出现成本倒挂。
 - 单次价格变化超过管理员配置的百分比阈值。
+
+Phase 2 实施口径（§21 Q6 裁决：仅后台展示 + 日志，不接通知渠道）：
+
+- 已实现五类：来源连续 3 次同步失败（`source_consecutive_failures`）、成本来源超 stale 阈值（`source_stale`）、模型覆盖率下降超门禁（`coverage_drop`）、来源配置在最近一次成功 run 之后被改（`source_config_changed`）、默认分组成本倒挂（`cost_inversion`）。
+- 前四类按 run 历史在读取时派生，随 `GET /api/upstream-prices/current` 与 `POST /api/upstream-prices/compare` 返回；倒挂由 compare 在同一 usage vector 下计算。
+- `coverage_drop` 的判定基准是**最近一次尝试**，不是最近两次成功 run：覆盖率暴跌会被门禁拒绝，被拒的 run 记为 `failed` 且不推进 baseline，只比较成功 run 会让最需要告警的场景反而无告警。判定依据是 run 上的显式列 `coverage_drop_exceeded`（可空布尔，`nil` 表示该列存在前写入的旧行，按「不是门禁拒绝」处理），不解析 `error_summary` 文本，也不从计数反推。最近一次尝试是门禁拒绝时，与上一次成功 run 比较并置 `params.gate_refused=true`；否则退回最近两次成功 run 的比较。
+- 写日志的位置是改变目录状态的路径（写入 run 之后），不是查询路径，避免日志随后台 UI 流量放大。该位置是手工与调度**共用**的写后钩子：手工 commit、调度 commit、被门禁拒绝的 run、抓取失败的 run 和调度 plan 前失败的轻量 run 都会触发一次告警评估与日志。定时同步默认关闭，把告警日志只挂在调度路径上等于默认永不落日志。
+- 成本倒挂日志按本次写入实际置为 current 的 canonical 模型集合评估（超过单次请求上限时分批），不再对全目录做一次全量比较：手工 commit 是交互式请求，而未被本次同步触及的模型的成本不可能因这次同步而改变。
+- 每条告警在 `detail`（英文串，保持兼容）之外回带结构化 `params`，供前端本地化：`source_consecutive_failures` → `failure_count`；`source_stale` → `run_id`、`age_seconds`、`threshold_seconds`；`source_config_changed` → `run_id`；`coverage_drop` → `run_id`、`previous_valid_count`、`valid_count`、`drop_threshold`、`gate_refused`；`cost_inversion` → `group`。
+- 「单次价格变化超过百分比阈值」仍未实现：现有变化门禁是覆盖率维度的，价格幅度阈值需要新的 per-model 基线比较，留待后续。
 
 ## 14. 数据保留
 
@@ -829,13 +892,13 @@ POST /api/upstream-prices/sale-candidate
 
 ### 20.2 Phase 2 验收
 
-- [ ] 定时同步复用 SystemTask lease，默认关闭，无重叠执行与不可控重试。
-- [ ] 价格源目录与价格比较页面，含 varies_by_provider、orphaned、canonical conflict 标注。
-- [ ] 毛利投影按 §9.3 口径执行；对引用 request probe 且无法安全中和的表达式按 AST 判定 fail closed。
-- [ ] billingexpr 基础表达式投影增量 API 落地。
-- [ ] 成本倒挂与覆盖率告警生效；来源失败、缺失模型和 stale 均 fail closed。
-- [ ] curated_reference 适配器（basellm / models.dev）接入并在 UI 标注非官方。
-- [ ] 多渠道同模型可以保留并展示不同成本。
+- [x] 定时同步复用 SystemTask lease，默认关闭，无重叠执行与不可控重试。
+- [ ] 价格源目录与价格比较页面，含 varies_by_provider、orphaned、canonical conflict 标注。（后端字段齐备，前端页面未开始）
+- [x] 毛利投影按 §9.3 口径执行；对引用 request probe 且无法安全中和的表达式按 AST 判定 fail closed。
+- [x] billingexpr 基础表达式投影增量 API 落地。
+- [x] 成本倒挂与覆盖率告警生效；来源失败、缺失模型和 stale 均 fail closed。
+- [ ] curated_reference 适配器（basellm / models.dev）接入并在 UI 标注非官方。（适配器已接入；UI 非官方标注待前端）
+- [ ] 多渠道同模型可以保留并展示不同成本。（compare 已按渠道分别返回成本；展示待前端）
 
 ### 20.3 Phase 3 验收
 
@@ -851,11 +914,11 @@ POST /api/upstream-prices/sale-candidate
 1. 已裁决：Vercel `/v1/models` 返回的是 gateway 对所有客户统一的实际收费价（实测对比加管理员确认账号无额外折扣），公开价即实际成本；`scope = public` 成立（见 §2.1）。
 2. 已裁决：首版不做 `vendor_list`；basellm、models.dev 等第三方整理价一律为 `curated_reference`，UI 必须标注非官方（见 §6.3）。
 3. 已裁决：人工合同价来源不进首版，后续独立立项。
-4. 保留（Phase 2 前需确认，不阻塞 Phase 1）：销售价比较默认使用哪个分组：`default`，还是管理员可选择的分组？
-5. 保留（Phase 2 前需确认，不阻塞 Phase 1）：历史价格保留期和成本信息的管理员可见范围是否需要进一步收紧？
-6. 保留（Phase 2 前需确认，不阻塞 Phase 1）：成本倒挂告警只在后台展示，还是需要接入现有通知渠道？
+4. 已裁决（Phase 2 实施期默认裁决，用户可推翻）：销售价比较默认使用 `default` 分组，管理员可显式指定其他分组；未配置倍率的分组按 1 计算并在响应中标注（见 §10.3）。
+5. 已裁决（Phase 2 实施期默认裁决，用户可推翻）：历史价格保留期（§14 默认 180 天）与成本信息可见范围（全部接口 RootAuth，成本明细归入 `admin_info`）维持现状，Phase 2 不做收紧。
+6. 已裁决（Phase 2 实施期默认裁决，用户可推翻）：成本倒挂等告警只在后台展示并写入后端日志，不接入任何通知渠道（见 §13）。
 
-在问题 4–6 得到确认前，可以实施 Phase 1 的只读价格目录，但不能启用“自动销售价更新”或宣称已经具备真实财务毛利。
+问题 4–6 的裁决只覆盖目录、比较与调度；仍不得启用“自动销售价更新”，也不得宣称已经具备真实财务毛利。
 
 ## 22. 修订记录
 
@@ -903,3 +966,20 @@ rev4（2026-08-28）：Codex 第二轮复审（4 MAJOR / 4 MINOR）修复，全�
 - §7.2 快照增加 `fingerprint_version`（进入 canonical payload）；§7.3 run 增加 `adapter_key`、`source_config_digest`、`http_status`、`response_bytes`、`duration_ms` 与 `rejected_count`；§13 措辞对齐持久化承载。
 - §9.3 ratio 分支写出精确公式：`USD_before_group = weighted_quota_before_group / QuotaPerUnit`（QuotaPerUnit 为 USD→quota 乘数，投影回 USD 用除法）；`p` 口径与 billingexpr 一致，cr/cc 单独提供时不重复计入 p。
 - 状态更新为 Draft rev4，进入 Phase 1 实施。
+
+rev5（2026-08-28）：Phase 2 后端实施期修订。§21 Q4/Q5/Q6 的裁决均为实施期默认裁决，用户可推翻。
+
+- §21 Q4 已裁决：比较分组默认 `default`，管理员可指定其他分组；未配置倍率的分组按 1 计算并在响应标注（§10.3 补实施口径）。
+- §21 Q5 已裁决：历史保留期与成本可见范围维持现状（§14 的 180 天、全部接口 RootAuth、成本明细归入 `admin_info`），Phase 2 不做收紧。
+- §21 Q6 已裁决：告警只在后台展示并写入后端日志，不接入通知渠道（§13 补实施口径与已实现的四类告警；价格幅度阈值告警仍未实现）。
+- §6.3：curated_reference 接入范围未缩小——models.dev 与 basellm 均确认有稳定免鉴权的机器可读端点，payload 形状一致、共用解析器；归一化限定为四类 flat token 价格，含 `tiers` / `context_over_200k` 的模型整条记为 unsupported。
+- §8.4：补 Phase 2 调度实施口径——`UPSTREAM_PRICE_SYNC_TASK_ENABLED` 默认关闭、15 分钟唤醒、6 小时下限双重强制、失败退避、单来源与总超时、orphan 拒绝执行、复用同一条 commit 路径。
+- §9.3 的 billingexpr 基础表达式投影增量 API 已落地为 `billingexpr.RunBaseExpr`：编译期把 instrument 过的 request-rule 因子替换为字面量 1，独立程序与独立缓存，不改变 `RunExpr` 语义；中和后仍引用 request probe 的表达式返回 `ErrRequestRuleNotProjectable`，compare 标注“含请求规则，无法投影”。
+- Phase 2 前端（价格源目录与价格比较页面）不在本次后端实施范围内，§20.2 对应验收项仍未完成。
+
+rev5.1（2026-08-29）：Phase 2 后端评审修复。
+
+- §8.4：补调度失败统一语义表（退避 / 连续失败告警 / 任务失败三个维度一起判定）。plan 前失败改为落一条无 item 的轻量 `failed` run；orphan 检查数据库错误从 `Skipped` 改为普通失败；commit CAS 冲突成为唯一既不退避也不落 run 的失败。
+- §7.3：run 增加 `coverage_drop_exceeded` 可空布尔列。
+- §13：`coverage_drop` 判定基准改为最近一次尝试，覆盖被门禁拒绝的 run；告警日志改由手工与调度共用的写后钩子触发，成本倒挂按本次写入的模型集合评估；告警补结构化 `params`；已实现告警计为五类（补上此前未列出的 `source_config_changed`）。
+- §10.3：usage vector 默认值明确为整体缺省，请求给出 `usage` 时未列出的维度按 0 计算；compare 的来源价格补 `unsupported_dimensions`。

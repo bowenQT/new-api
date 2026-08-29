@@ -315,3 +315,97 @@ entries:
       - scripts/agent-runtime/verify.sh docs
     removal_condition: Retain the README.md notice while the fork is independently maintained; remove link-only deviations if the inherited documentation ships equivalent corrections.
     upstream_reference: null
+
+  - id: upstream-price-catalog-phase2
+    status: active
+    owner: downstream-maintainers
+    introduced_commit: 53c316bc182853892af75b693c9d4d9150e47aa7
+    purpose: Phase 2 of the upstream price catalog per docs/downstream/upstream-price-catalog-spec.md — billingexpr base-expression projection, the RootAuth cost/sale/margin comparison endpoint, scheduled catalog sync on the existing SystemTask runner (off by default), catalog health alerts, the models.dev / basellm curated reference adapters, the RootAuth adapter listing endpoint, and the §8.3 freshness fields on the source list and comparison responses. It reads sale-pricing configuration for the comparison projection and still writes none of it.
+    paths:
+      - pkg/billingexpr/compile.go
+      - pkg/billingexpr/project.go
+      - pkg/billingexpr/project_test.go
+      - model/system_task.go
+      - controller/system_task_handlers.go
+      - service/upstreamprice/alerts.go
+      - service/upstreamprice/alerts_test.go
+      - service/upstreamprice/compare.go
+      - service/upstreamprice/compare_test.go
+      - service/upstreamprice/registry_test.go
+      - service/upstreamprice/schedule.go
+      - service/upstreamprice/schedule_test.go
+      - service/upstreamprice/source_test.go
+      - service/upstreamprice/adapters/catalog_alerting_test.go
+      - service/upstreamprice/adapters/curated_reference.go
+      - service/upstreamprice/adapters/curated_reference_test.go
+      - service/upstreamprice/adapters/scheduled_sync_test.go
+      - service/upstreamprice/adapters/testdata/curated_basellm_sample.json
+      - service/upstreamprice/adapters/testdata/curated_models_dev_sample.json
+    upstream_touchpoints:
+      - billing expression compiler in pkg/billingexpr (shared requestRuleFactor shape detection and cache invalidation)
+      - SystemTask type registry in model/system_task.go and scheduled handler registration in controller/system_task_handlers.go
+      - RootAuth API route groups /api/upstream-prices and /api/upstream-price-sources in router/api-router.go, including GET /api/upstream-price-sources/adapters
+      - sale-pricing read accessors in setting/ratio_setting and setting/billing_setting
+    conflict_risk: medium
+    verification:
+      - go build ./... and go vet ./...
+      - go test ./pkg/billingexpr/... ./service/upstreamprice/... ./model ./controller -count=1
+      - billingexpr regression asserting RunExpr results and request-rule traces are unchanged by a base-expression projection, in both evaluation orders
+      - scheduled sync end-to-end tests asserting byte-identical sale-pricing exports, orphan refusal, and default-off selection
+      - scheduled failure semantics tests covering the spec §8.4 table — a pre-plan failure records a lightweight failed run and reaches the consecutive-failure alert, an orphan-check database error fails the pass and backs the source off, and a commit CAS conflict neither backs off nor records a run
+    removal_condition: Remove only if the upstream price catalog feature is retired or upstream ships an equivalent comparison, scheduling, and reference-adapter capability.
+    upstream_reference: null
+
+  - id: upstream-price-catalog-phase2-ui
+    status: active
+    owner: downstream-maintainers
+    introduced_commit: ae59ce340bf5714b2ae0ebcab640f401bc4db981
+    purpose: Root-only admin UI for the upstream price catalog per docs/downstream/upstream-price-catalog-spec.md §11 — a price source catalog page (source management, two-phase preview/commit sync, schedule toggles, orphan and health labeling) and a price comparison page (cost, sale-price projection, margin and integrity labels). It only reads the RootAuth catalog APIs and offers no path that writes sale pricing.
+    paths:
+      - web/src/features/price-catalog/api.ts
+      - web/src/features/price-catalog/components/catalog-alerts.tsx
+      - web/src/features/price-catalog/components/catalog-badges.tsx
+      - web/src/features/price-catalog/components/price-compare-panel.tsx
+      - web/src/features/price-catalog/components/price-compare-table.tsx
+      - web/src/features/price-catalog/components/price-source-mutate-drawer.tsx
+      - web/src/features/price-catalog/components/price-source-sync-dialog.tsx
+      - web/src/features/price-catalog/components/price-sources-panel.tsx
+      - web/src/features/price-catalog/components/__tests__/catalog-alerts.test.tsx
+      - web/src/features/price-catalog/components/__tests__/price-compare-panel.test.tsx
+      - web/src/features/price-catalog/components/__tests__/price-compare-table.test.tsx
+      - web/src/features/price-catalog/components/__tests__/price-source-mutate-drawer.test.tsx
+      - web/src/features/price-catalog/components/__tests__/price-source-sync-dialog.test.tsx
+      - web/src/features/price-catalog/components/__tests__/price-sources-panel.test.tsx
+      - web/src/features/price-catalog/constants.ts
+      - web/src/features/price-catalog/index.tsx
+      - web/src/features/price-catalog/lib/alert-detail.ts
+      - web/src/features/price-catalog/lib/compare-format.ts
+      - web/src/features/price-catalog/lib/source-form.ts
+      - web/src/features/price-catalog/section-registry.tsx
+      - web/src/features/price-catalog/types.ts
+      - web/src/routes/_authenticated/price-catalog/$section.tsx
+      - web/src/routes/_authenticated/price-catalog/index.tsx
+      - web/src/routeTree.gen.ts
+      - web/src/i18n/locales/en.json
+      - web/src/i18n/locales/fr.json
+      - web/src/i18n/locales/ja.json
+      - web/src/i18n/locales/ru.json
+      - web/src/i18n/locales/vi.json
+      - web/src/i18n/locales/zh-TW.json
+      - web/src/i18n/locales/zh.json
+    upstream_touchpoints:
+      - admin sidebar navigation in web/src/hooks/use-sidebar-data.ts (two root-only entries, path already owned by downstream-frontend-lint-fixes)
+      - generated TanStack route tree in web/src/routeTree.gen.ts
+      - shared frontend i18n locale files and the i18n:sync report
+      - RootAuth API groups /api/upstream-price-sources and /api/upstream-prices
+      - the adapter registry catalog, served by GET /api/upstream-price-sources/adapters; the UI now reads that endpoint for every adapter role, scope, channel requirement and endpoint, and web/src/features/price-catalog/constants.ts keeps only the untranslated adapter display names
+    conflict_risk: medium
+    verification:
+      - cd web && bun run typecheck
+      - cd web && bun run lint
+      - cd web && bun run test
+      - cd web && bun run build
+      - cd web && bun run i18n:sync with a zero missing/extra/untranslated report
+      - scripts/agent-runtime/verify.sh frontend
+    removal_condition: Remove only if the upstream price catalog feature is retired or upstream ships an equivalent admin surface.
+    upstream_reference: null

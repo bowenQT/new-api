@@ -120,6 +120,29 @@ func PerMillionTokenCoefficient(perTokenCost string) (string, error) {
 	return parsed.Shift(6).String(), nil
 }
 
+// maxPerMillionTokenPriceUSD bounds a USD-per-1M-tokens coefficient. It is the
+// same ceiling as maxPerTokenPriceUSD expressed in the other unit, so both
+// source conventions are rejected at the same real price.
+var maxPerMillionTokenPriceUSD = decimal.NewFromInt(1_000_000)
+
+// MillionTokenCoefficient validates a source price that is already quoted in
+// USD per 1M tokens and returns its canonical decimal string. Sources quoting
+// USD per token must use PerMillionTokenCoefficient instead.
+func MillionTokenCoefficient(perMillionCost string) (string, error) {
+	normalized, err := NormalizeDecimalString(perMillionCost)
+	if err != nil {
+		return "", err
+	}
+	parsed, err := decimal.NewFromString(normalized)
+	if err != nil {
+		return "", fmt.Errorf("invalid decimal string %q: %w", perMillionCost, err)
+	}
+	if parsed.GreaterThan(maxPerMillionTokenPriceUSD) {
+		return "", fmt.Errorf("per-1M-token price %q exceeds %s USD and is rejected", perMillionCost, maxPerMillionTokenPriceUSD.String())
+	}
+	return normalized, nil
+}
+
 // truncateUTF8 cuts a string to at most max bytes without splitting a UTF-8
 // sequence.
 func truncateUTF8(s string, max int) string {

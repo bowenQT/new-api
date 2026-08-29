@@ -2,7 +2,10 @@ package upstreamprice
 
 import (
 	"fmt"
+	"sort"
 	"sync"
+
+	"github.com/QuantumNous/new-api/dto"
 )
 
 var (
@@ -32,6 +35,48 @@ func MustRegisterAdapter(adapter Adapter) {
 	if err := RegisterAdapter(adapter); err != nil {
 		panic(err)
 	}
+}
+
+// ListAdapters projects every registered adapter's non-secret contract,
+// sorted by key. It is the authority the admin UI reads instead of shipping
+// its own adapter table, so a newly registered adapter never drifts out of
+// sync with the form that configures it.
+func ListAdapters() []dto.UpstreamPriceAdapterView {
+	registryMu.RLock()
+	adapters := make([]Adapter, 0, len(registry))
+	for _, adapter := range registry {
+		adapters = append(adapters, adapter)
+	}
+	registryMu.RUnlock()
+
+	views := make([]dto.UpstreamPriceAdapterView, 0, len(adapters))
+	for _, adapter := range adapters {
+		roles := adapter.AllowedRoles()
+		// Only supplier_cost sources reference a channel, and every other
+		// role must not (ValidatePriceSourceForWrite). An adapter therefore
+		// requires a channel exactly when supplier_cost is its only role.
+		requiresChannel := len(roles) > 0
+		roleNames := make([]string, 0, len(roles))
+		for _, role := range roles {
+			roleNames = append(roleNames, string(role))
+			if role != RoleSupplierCost {
+				requiresChannel = false
+			}
+		}
+		scopeNames := make([]string, 0)
+		for _, scope := range adapter.AllowedScopes() {
+			scopeNames = append(scopeNames, string(scope))
+		}
+		views = append(views, dto.UpstreamPriceAdapterView{
+			Key:             adapter.Key(),
+			AllowedRoles:    roleNames,
+			AllowedScopes:   scopeNames,
+			RequiresChannel: requiresChannel,
+			Endpoint:        adapter.Endpoint(),
+		})
+	}
+	sort.Slice(views, func(i, j int) bool { return views[i].Key < views[j].Key })
+	return views
 }
 
 func GetAdapter(key string) (Adapter, bool) {

@@ -1,0 +1,74 @@
+{
+  "anthropic": {
+    "id": "anthropic",
+    "name": "Anthropic",
+    "models": {
+      "claude-sonnet-4-5": {
+        "id": "claude-sonnet-4-5",
+        "name": "Claude Sonnet 4.5",
+        "cost": {
+          "input": 3,
+          "output": 15,
+          "cache_read": 0.3,
+          "cache_write": 3.75
+        }
+      },
+      "claude-opus-tiered": {
+        "id": "claude-opus-tiered",
+        "cost": {
+          "input": 5,
+          "output": 30,
+          "cache_read": 0.5,
+          "tiers": [
+            {
+              "input": 10,
+              "output": 45,
+              "cache_read": 1,
+              "tier": { "type": "context", "size": 272000 }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "openai": {
+    "id": "openai",
+    "name": "OpenAI",
+    "models": {
+      "gpt-4o-mini": {
+        "id": "gpt-4o-mini",
+        "cost": {
+          "input": 0.15,
+          "output": 0.6,
+          "reasoning": 0.9,
+          "input_audio": 10
+        }
+      },
+      "gpt-legacy-context": {
+        "id": "gpt-legacy-context",
+        "cost": {
+          "input": 2,
+          "output": 8,
+          "context_over_200k": { "input": 4, "output": 16 }
+        }
+      },
+      "embedding-only": {
+        "id": "embedding-only",
+        "cost": {
+          "input": 0.02
+        }
+      },
+      "no-cost-model": {
+        "id": "no-cost-model",
+        "name": "Model without pricing"
+      },
+      "negative-price": {
+        "id": "negative-price",
+        "cost": {
+          "input": -1,
+          "output": 2
+        }
+      }
+    }
+  }
+}

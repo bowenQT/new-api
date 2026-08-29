@@ -120,6 +120,14 @@ type PriceSyncRun struct {
 	NewSnapshotCount     int    `json:"new_snapshot_count"`
 	IdempotentHitCount   int    `json:"idempotent_hit_count"`
 	ErrorSummary         string `json:"error_summary" gorm:"type:varchar(255)"`
+	// CoverageDropExceeded records whether the coverage gate refused this run,
+	// as an explicit marker rather than something alerting has to infer from
+	// ErrorSummary text or from counts. It is a pointer so the column stays
+	// nullable on every supported database: rows written before the column
+	// existed read back as nil ("not known to be a gate refusal") instead of
+	// failing to scan, and no boolean default is declared, so AutoMigrate
+	// cannot churn on MySQL/PostgreSQL default normalization.
+	CoverageDropExceeded *bool `json:"coverage_drop_exceeded,omitempty"`
 }
 
 // PriceSyncRunItem is the per-model detail of one run (spec §7.3). The
@@ -138,6 +146,14 @@ func GetAllPriceSources() ([]*PriceSource, error) {
 	var sources []*PriceSource
 	err := DB.Order("id asc").Find(&sources).Error
 	return sources, err
+}
+
+// CountSchedulablePriceSources counts sources that are both enabled and
+// scheduled, so the background task creates no rows when nothing is scheduled.
+func CountSchedulablePriceSources() (int64, error) {
+	var count int64
+	err := DB.Model(&PriceSource{}).Where("enabled = ? AND schedule_enabled = ?", true, true).Count(&count).Error
+	return count, err
 }
 
 func GetPriceSourceById(id int) (*PriceSource, error) {
@@ -194,6 +210,43 @@ func GetPriceSyncRunById(id int) (*PriceSyncRun, error) {
 		return nil, err
 	}
 	return run, nil
+}
+
+// GetRecentPriceSyncRuns returns a source's most recent runs, newest first.
+// Run id is the ordering authority (spec §7.3).
+func GetRecentPriceSyncRuns(sourceId int, limit int) ([]*PriceSyncRun, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	var runs []*PriceSyncRun
+	err := DB.Where("source_id = ?", sourceId).Order("id desc").Limit(limit).Find(&runs).Error
+	return runs, err
+}
+
+// GetRecentSuccessfulPriceSyncRuns returns a source's most recent runs that
+// advanced last_success_run_id (succeeded or partial), newest first.
+func GetRecentSuccessfulPriceSyncRuns(sourceId int, limit int) ([]*PriceSyncRun, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	var runs []*PriceSyncRun
+	err := DB.Where("source_id = ? AND status IN ?", sourceId, []string{PriceSyncRunStatusSucceeded, PriceSyncRunStatusPartial}).
+		Order("id desc").
+		Limit(limit).
+		Find(&runs).Error
+	return runs, err
+}
+
+// GetPriceSyncRunsByIds loads the named runs in one query so a list view can
+// annotate every source with its last successful run without issuing a query
+// per source.
+func GetPriceSyncRunsByIds(ids []int) ([]*PriceSyncRun, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var runs []*PriceSyncRun
+	err := DB.Where("id IN ?", ids).Find(&runs).Error
+	return runs, err
 }
 
 func GetPriceSyncRunItems(runId int) ([]*PriceSyncRunItem, error) {
@@ -384,6 +437,20 @@ func CommitPriceSync(commit *PriceSyncCommit) (*PriceSyncRun, error) {
 		return nil, err
 	}
 	return &run, nil
+}
+
+// RecordPriceSourceFailure stamps a source's failure time and summary for an
+// attempt that produced no run at all — a preflight refusal, an unavailable
+// adapter, or a commit transaction that never wrote its run. The scheduler's
+// due check reads last_error_at, so an attempt that leaves no run must still
+// leave a timestamp or the source retries on every wake (spec §8.4).
+func RecordPriceSourceFailure(sourceId int, errorSummary string) error {
+	now := common.GetTimestamp()
+	return DB.Model(&PriceSource{}).Where("id = ?", sourceId).Updates(map[string]interface{}{
+		"last_error_at":      now,
+		"last_error_summary": truncateSummary(errorSummary),
+		"updated_time":       now,
+	}).Error
 }
 
 // upsertPriceSnapshot implements fingerprint idempotency: an existing

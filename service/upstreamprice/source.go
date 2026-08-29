@@ -1,6 +1,7 @@
 package upstreamprice
 
 import (
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 )
@@ -77,19 +78,53 @@ func UpdatePriceSource(id int, req *dto.UpstreamPriceSourceRequest) (*model.Pric
 	return source, nil
 }
 
-// ListPriceSources returns all sources annotated with their orphan state.
+// ListPriceSources returns all sources annotated with their orphan state and
+// the coverage / freshness aggregates of their last successful run (spec
+// §8.3). The runs are loaded with a single batched query, never one per
+// source.
 func ListPriceSources() ([]dto.UpstreamPriceSourceView, error) {
 	sources, err := model.GetAllPriceSources()
 	if err != nil {
 		return nil, err
 	}
+	runIds := make([]int, 0, len(sources))
+	for _, source := range sources {
+		if source.LastSuccessRunId != nil {
+			runIds = append(runIds, *source.LastSuccessRunId)
+		}
+	}
+	runs, err := model.GetPriceSyncRunsByIds(runIds)
+	if err != nil {
+		return nil, err
+	}
+	runById := make(map[int]*model.PriceSyncRun, len(runs))
+	for _, run := range runs {
+		runById[run.Id] = run
+	}
+
+	now := common.GetTimestamp()
 	views := make([]dto.UpstreamPriceSourceView, 0, len(sources))
 	for _, source := range sources {
 		orphaned, err := IsPriceSourceOrphaned(source)
 		if err != nil {
 			return nil, err
 		}
-		views = append(views, sourceView(source, orphaned))
+		config, err := SourceConfigFromModel(source)
+		if err != nil {
+			return nil, err
+		}
+		view := sourceView(source, orphaned)
+		if source.LastSuccessRunId != nil {
+			if run := runById[*source.LastSuccessRunId]; run != nil {
+				view.LastSuccessFinishedAt = run.FinishedAt
+				view.CoverageCount = run.ValidCount
+				view.MissingCount = run.MissingCount
+				if run.FinishedAt != nil {
+					view.Stale = now-*run.FinishedAt > staleThresholdSeconds(source, config.Settings)
+				}
+			}
+		}
+		views = append(views, view)
 	}
 	return views, nil
 }

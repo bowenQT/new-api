@@ -21,6 +21,9 @@ const (
 	SystemTaskTypeModelUpdate    = "model_update"
 	SystemTaskTypeMidjourneyPoll = "midjourney_poll"
 	SystemTaskTypeAsyncTaskPoll  = "async_task_poll"
+	// SystemTaskTypeUpstreamPriceSync is the single task type of the upstream
+	// price catalog's scheduled sync; due sources are selected inside the task.
+	SystemTaskTypeUpstreamPriceSync = "upstream_price_sync"
 )
 
 var ErrSystemTaskLockLost = errors.New("system task lock lost")
