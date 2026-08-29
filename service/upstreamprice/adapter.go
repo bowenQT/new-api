@@ -195,6 +195,12 @@ type FetchMeta struct {
 	ResponseBytes  int64 // decompressed size actually read
 	Discovered     int   // total models the source returned
 	Skipped        []SkippedModel
+	// NotModified marks a conditional fetch the upstream answered with 304:
+	// the representation is unchanged, no body was read or parsed, and no
+	// observations are returned. The sync engine then replays the baseline run
+	// instead of normalizing anything. It is only ever honoured for a request
+	// the engine itself made conditional.
+	NotModified bool
 }
 
 // Adapter is the uniform per-vendor contract (spec §6.1). Every adapter must
@@ -221,6 +227,22 @@ type Adapter interface {
 // interface; it does not implement it and return an empty string.
 type EndpointReporter interface {
 	Endpoint() string
+}
+
+// ConditionalFetcher is the optional capability of adapters whose upstream
+// supports HTTP conditional requests. The sync engine calls FetchConditional
+// instead of Fetch when it holds the source revision (ETag) of the baseline
+// run and that baseline is still an exact statement of what a full fetch would
+// produce today; ifNoneMatch is that revision.
+//
+// An implementation must set FetchMeta.NotModified only for an actual 304
+// answer to the conditional request it sent, and must not read, size-check, or
+// parse a body in that case. If the revision is unusable as a validator it
+// must fall back to an unconditional request rather than put a malformed
+// header on the wire. An adapter that is not HTTP-backed, or whose upstream
+// publishes no validator, simply does not implement this interface.
+type ConditionalFetcher interface {
+	FetchConditional(ctx context.Context, source SourceConfig, ifNoneMatch string) ([]Observation, FetchMeta, error)
 }
 
 // ResolveObservationRoleScope implements the single authoritative role/scope

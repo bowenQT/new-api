@@ -115,9 +115,42 @@ func (a *CuratedReferenceAdapter) validateEndpoint() error {
 }
 
 func (a *CuratedReferenceAdapter) Fetch(ctx context.Context, source upstreamprice.SourceConfig) ([]upstreamprice.Observation, upstreamprice.FetchMeta, error) {
+	return a.fetch(ctx, "")
+}
+
+// FetchConditional implements upstreamprice.ConditionalFetcher. Both curated
+// catalogs are static files served with a strong ETag and honour
+// If-None-Match, so an unchanged catalog answers 304 and the multi-megabyte
+// body is never transferred or parsed.
+func (a *CuratedReferenceAdapter) FetchConditional(ctx context.Context, source upstreamprice.SourceConfig, ifNoneMatch string) ([]upstreamprice.Observation, upstreamprice.FetchMeta, error) {
+	return a.fetch(ctx, ifNoneMatch)
+}
+
+// isEntityTag reports whether a stored source revision is a well-formed HTTP
+// entity-tag (RFC 9110 §8.8.3) and can therefore be sent as If-None-Match. One
+// that is not — a revision truncated to the column width, or a non-ETag
+// version string — degrades to an unconditional fetch instead of putting a
+// malformed header on the wire.
+func isEntityTag(value string) bool {
+	body := strings.TrimPrefix(value, "W/")
+	if len(body) < 2 || body[0] != '"' || body[len(body)-1] != '"' {
+		return false
+	}
+	for i := 1; i < len(body)-1; i++ {
+		if body[i] < 0x21 || body[i] == '"' || body[i] == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *CuratedReferenceAdapter) fetch(ctx context.Context, ifNoneMatch string) ([]upstreamprice.Observation, upstreamprice.FetchMeta, error) {
 	meta := upstreamprice.FetchMeta{}
 	if err := a.validateEndpoint(); err != nil {
 		return nil, meta, err
+	}
+	if !isEntityTag(ifNoneMatch) {
+		ifNoneMatch = ""
 	}
 	response, err := upstreamprice.DoCatalogRequest(ctx, a.client, func(requestCtx context.Context) (*http.Request, error) {
 		request, err := http.NewRequestWithContext(requestCtx, http.MethodGet, a.endpoint, nil)
@@ -125,6 +158,9 @@ func (a *CuratedReferenceAdapter) Fetch(ctx context.Context, source upstreampric
 			return nil, err
 		}
 		request.Header.Set("Accept", "application/json")
+		if ifNoneMatch != "" {
+			request.Header.Set("If-None-Match", ifNoneMatch)
+		}
 		// Public catalogs: no credential is ever attached (spec §12).
 		return request, nil
 	})
@@ -134,6 +170,15 @@ func (a *CuratedReferenceAdapter) Fetch(ctx context.Context, source upstreampric
 	defer response.Body.Close()
 	meta.HTTPStatus = response.StatusCode
 	meta.SourceRevision = response.Header.Get("ETag")
+	if ifNoneMatch != "" && response.StatusCode == http.StatusNotModified {
+		// A 304 carries no body: nothing is read, size-checked, or parsed, and
+		// a reply that omits the validator keeps the one we asked about.
+		meta.NotModified = true
+		if meta.SourceRevision == "" {
+			meta.SourceRevision = ifNoneMatch
+		}
+		return nil, meta, nil
+	}
 	if response.StatusCode != http.StatusOK {
 		return nil, meta, fmt.Errorf("%s fetch: http %d", a.key, response.StatusCode)
 	}

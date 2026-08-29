@@ -291,41 +291,106 @@ func coverageDropThreshold(config SourceConfig) float64 {
 	return DefaultCoverageDropThreshold
 }
 
-// loadBaseState reads the last successful run of a source: its id, per-model
-// current fingerprints (valid items only), the set of historical model names
-// (all statuses, so missing markers persist across runs), and the valid count.
-func loadBaseState(source *model.PriceSource) (*int, map[string]string, map[string]bool, int, error) {
+// baseState is the last successful run of a source, as far as planning the
+// next one needs it.
+type baseState struct {
+	RunId *int
+	Run   *model.PriceSyncRun
+	// Items are the baseline run items in id order, the manifest a 304 answer
+	// replays.
+	Items []*model.PriceSyncRunItem
+	// Fingerprints and Snapshots are keyed by source model name and cover the
+	// valid items only.
+	Fingerprints map[string]string
+	Snapshots    map[string]*model.PriceSnapshot
+	// Historical holds every model name the baseline run saw, in any status, so
+	// missing markers persist across runs.
+	Historical map[string]bool
+	ValidCount int
+}
+
+// loadBaseState reads the last successful run of a source. A source that never
+// committed one returns an empty state rather than an error.
+func loadBaseState(source *model.PriceSource) (*baseState, error) {
+	base := &baseState{
+		Fingerprints: map[string]string{},
+		Snapshots:    map[string]*model.PriceSnapshot{},
+		Historical:   map[string]bool{},
+	}
 	if source.LastSuccessRunId == nil {
-		return nil, map[string]string{}, map[string]bool{}, 0, nil
+		return base, nil
 	}
 	baseRunId := *source.LastSuccessRunId
+	run, err := model.GetPriceSyncRunById(baseRunId)
+	if err != nil {
+		return nil, err
+	}
 	items, err := model.GetPriceSyncRunItems(baseRunId)
 	if err != nil {
-		return nil, nil, nil, 0, err
+		return nil, err
 	}
-	historical := make(map[string]bool, len(items))
+	base.RunId = source.LastSuccessRunId
+	base.Run = run
+	base.Items = items
 	validSnapshotIds := make([]int, 0, len(items))
-	snapshotIdByModel := make(map[int]string, len(items))
-	validCount := 0
+	modelBySnapshotId := make(map[int]string, len(items))
 	for _, item := range items {
-		historical[item.SourceModelName] = true
+		base.Historical[item.SourceModelName] = true
 		if item.Status == model.PriceSyncItemStatusValid && item.SnapshotId != nil {
-			validCount++
+			base.ValidCount++
 			validSnapshotIds = append(validSnapshotIds, *item.SnapshotId)
-			snapshotIdByModel[*item.SnapshotId] = item.SourceModelName
+			modelBySnapshotId[*item.SnapshotId] = item.SourceModelName
 		}
 	}
-	fingerprints := make(map[string]string, len(validSnapshotIds))
 	snapshots, err := model.GetPriceSnapshotsByIds(validSnapshotIds)
 	if err != nil {
-		return nil, nil, nil, 0, err
+		return nil, err
 	}
 	for _, snapshot := range snapshots {
-		if modelName, ok := snapshotIdByModel[snapshot.Id]; ok {
-			fingerprints[modelName] = snapshot.Fingerprint
+		if modelName, ok := modelBySnapshotId[snapshot.Id]; ok {
+			base.Fingerprints[modelName] = snapshot.Fingerprint
+			base.Snapshots[modelName] = snapshot
 		}
 	}
-	return source.LastSuccessRunId, fingerprints, historical, validCount, nil
+	return base, nil
+}
+
+// conditionalFetchRevision returns the baseline source revision to send as
+// If-None-Match, or "" when the fetch must download the full representation.
+//
+// A 304 answer is replayed from the baseline run without re-normalizing
+// anything, so a conditional request is only safe while the baseline is still
+// an exact statement of what a full fetch would produce today. Two conditions
+// establish that, and either one failing forces the full path:
+//
+//   - the configuration the baseline ran under still matches the source's
+//     current configuration (the §7.3 digest). A changed model mapping, role,
+//     scope, channel, or adapter re-normalizes into different snapshots, and
+//     replaying the old ones would re-confirm them under the new configuration
+//     and silently clear the source_config_changed alert.
+//   - every baseline valid snapshot carries the current FingerprintVersion. A
+//     bumped version means today's canonical payload differs, so a full fetch
+//     of the same bytes would produce new snapshots; replaying would keep the
+//     older-version ones current instead. Any change to normalization
+//     semantics must therefore bump FingerprintVersion (spec §7.2) for this
+//     gate to hold.
+func conditionalFetchRevision(config SourceConfig, base *baseState) string {
+	if base.Run == nil || base.Run.SourceRevision == "" {
+		return ""
+	}
+	if priceSourceConfigChanged(config, base.Run) {
+		return ""
+	}
+	// A baseline whose snapshot rows cannot all be read back is not replayable.
+	if base.ValidCount == 0 || len(base.Snapshots) != base.ValidCount {
+		return ""
+	}
+	for _, snapshot := range base.Snapshots {
+		if snapshot.FingerprintVersion != FingerprintVersion {
+			return ""
+		}
+	}
+	return base.Run.SourceRevision
 }
 
 // buildSyncPlan runs fetch → normalize → validate → diff for one source. It
@@ -339,33 +404,53 @@ func buildSyncPlan(ctx context.Context, source *model.PriceSource) (*syncPlan, e
 	if err != nil {
 		return nil, err
 	}
-	baseRunId, baseFingerprints, historical, baseValidCount, err := loadBaseState(source)
+	base, err := loadBaseState(source)
 	if err != nil {
 		return nil, err
 	}
 
+	ifNoneMatch := ""
+	conditionalFetcher, supportsConditional := adapter.(ConditionalFetcher)
+	if supportsConditional {
+		ifNoneMatch = conditionalFetchRevision(config, base)
+	}
+
 	startedAt := common.GetTimestamp()
 	fetchStart := time.Now()
-	observations, meta, err := adapter.Fetch(ctx, config)
+	var (
+		observations []Observation
+		meta         FetchMeta
+	)
+	if ifNoneMatch != "" {
+		observations, meta, err = conditionalFetcher.FetchConditional(ctx, config, ifNoneMatch)
+	} else {
+		observations, meta, err = adapter.Fetch(ctx, config)
+	}
 	durationMs := time.Since(fetchStart).Milliseconds()
 	if err != nil {
 		return &syncPlan{
 			Source:     config,
 			AdapterKey: adapter.Key(),
 			Meta:       meta,
-			BaseRunId:  baseRunId,
+			BaseRunId:  base.RunId,
 			StartedAt:  startedAt,
 			DurationMs: durationMs,
 			Status:     model.PriceSyncRunStatusFailed,
 		}, fmt.Errorf("fetch failed for source %d via adapter %s: %w", source.Id, adapter.Key(), err)
+	}
+	// NotModified is only honoured for a request this function made
+	// conditional, so an adapter cannot put the engine on the replay path
+	// without a baseline to replay.
+	if ifNoneMatch != "" && meta.NotModified {
+		return buildNotModifiedPlan(config, adapter.Key(), meta, base, startedAt, durationMs), nil
 	}
 
 	plan := &syncPlan{
 		Source:         config,
 		AdapterKey:     adapter.Key(),
 		Meta:           meta,
-		BaseRunId:      baseRunId,
-		BaseValidCount: baseValidCount,
+		BaseRunId:      base.RunId,
+		BaseValidCount: base.ValidCount,
 		GateThreshold:  coverageDropThreshold(config),
 		StartedAt:      startedAt,
 		DurationMs:     durationMs,
@@ -447,7 +532,7 @@ func buildSyncPlan(ctx context.Context, source *model.PriceSource) (*syncPlan, e
 		}
 		item.Status = model.PriceSyncItemStatusValid
 		item.Price = normalized
-		if baseFingerprint, ok := baseFingerprints[obs.SourceModelName]; !ok {
+		if baseFingerprint, ok := base.Fingerprints[obs.SourceModelName]; !ok {
 			item.Change = changeNew
 		} else if baseFingerprint != normalized.Fingerprint {
 			item.Change = changeChanged
@@ -457,9 +542,24 @@ func buildSyncPlan(ctx context.Context, source *model.PriceSource) (*syncPlan, e
 		plan.Items = append(plan.Items, item)
 	}
 
+	for name := range base.Historical {
+		if !seen[name] {
+			plan.Missing = append(plan.Missing, name)
+		}
+	}
+	plan.deriveRunOutcome()
+	return plan, nil
+}
+
+// deriveRunOutcome sorts a plan's manifest and derives the per-status counts,
+// the coverage-drop verdict, and the run status from it (spec §8.2). The full
+// fetch path and the 304 replay path both end here, so a replayed baseline is
+// graded by exactly the same rules — a partial baseline replays as partial.
+func (plan *syncPlan) deriveRunOutcome() {
 	sort.Slice(plan.Items, func(i, j int) bool {
 		return plan.Items[i].SourceModelName < plan.Items[j].SourceModelName
 	})
+	sort.Strings(plan.Missing)
 	for _, item := range plan.Items {
 		switch item.Status {
 		case model.PriceSyncItemStatusValid:
@@ -479,15 +579,8 @@ func buildSyncPlan(ctx context.Context, source *model.PriceSource) (*syncPlan, e
 		}
 	}
 
-	for name := range historical {
-		if !seen[name] {
-			plan.Missing = append(plan.Missing, name)
-		}
-	}
-	sort.Strings(plan.Missing)
-
-	if baseValidCount > 0 {
-		drop := 1 - float64(plan.ValidCount)/float64(baseValidCount)
+	if plan.BaseValidCount > 0 {
+		drop := 1 - float64(plan.ValidCount)/float64(plan.BaseValidCount)
 		plan.CoverageDropExceeded = drop > plan.GateThreshold
 	}
 
@@ -501,7 +594,89 @@ func buildSyncPlan(ctx context.Context, source *model.PriceSource) (*syncPlan, e
 	default:
 		plan.Status = model.PriceSyncRunStatusSucceeded
 	}
-	return plan, nil
+}
+
+// buildNotModifiedPlan replays the baseline run for a 304 answer: the upstream
+// representation is unchanged, so every baseline item is re-affirmed exactly as
+// it was recorded and nothing is fetched, parsed, or re-normalized. The valid
+// items carry their baseline snapshots, which the commit transaction resolves
+// through the same fingerprint idempotency as any other run, so they keep the
+// same snapshot ids and only their last_seen evidence advances.
+func buildNotModifiedPlan(config SourceConfig, adapterKey string, meta FetchMeta, base *baseState, startedAt int64, durationMs int64) *syncPlan {
+	// A 304 carries no body, so the source-level evidence a full fetch reports
+	// from the payload is copied from the baseline run instead of invented.
+	meta.ResponseBytes = 0
+	meta.Skipped = nil
+	meta.Discovered = base.Run.DiscoveredCount
+	if meta.SourceRevision == "" {
+		meta.SourceRevision = base.Run.SourceRevision
+	}
+	plan := &syncPlan{
+		Source:         config,
+		AdapterKey:     adapterKey,
+		Meta:           meta,
+		BaseRunId:      base.RunId,
+		BaseValidCount: base.ValidCount,
+		GateThreshold:  coverageDropThreshold(config),
+		StartedAt:      startedAt,
+		DurationMs:     durationMs,
+	}
+	for _, item := range base.Items {
+		switch item.Status {
+		case model.PriceSyncItemStatusValid:
+			snapshot := base.Snapshots[item.SourceModelName]
+			if snapshot == nil {
+				// conditionalFetchRevision refuses a baseline whose snapshots
+				// cannot all be read, so this cannot be reached; dropping the
+				// item keeps the coverage gate as the fallback authority.
+				continue
+			}
+			plan.Items = append(plan.Items, plannedItem{
+				SourceModelName: item.SourceModelName,
+				Status:          model.PriceSyncItemStatusValid,
+				Change:          changeUnchanged,
+				Price:           replayPriceFromSnapshot(snapshot),
+			})
+		case model.PriceSyncItemStatusMissing:
+			plan.Missing = append(plan.Missing, item.SourceModelName)
+		default:
+			plan.Items = append(plan.Items, plannedItem{
+				SourceModelName: item.SourceModelName,
+				Status:          item.Status,
+				WarningCode:     item.WarningCode,
+			})
+		}
+	}
+	plan.deriveRunOutcome()
+	return plan
+}
+
+// replayPriceFromSnapshot rebuilds the normalized price a baseline snapshot was
+// written from. Every field is read back from the stored row, including the
+// fingerprint, so a 304 replay re-affirms the recorded observation instead of
+// recomputing it.
+func replayPriceFromSnapshot(snapshot *model.PriceSnapshot) *NormalizedPrice {
+	price := &NormalizedPrice{
+		SourceModelName:    snapshot.SourceModelName,
+		CanonicalModelName: snapshot.CanonicalModelName,
+		MappingStatus:      snapshot.MappingStatus,
+		Role:               PriceRole(snapshot.Role),
+		Scope:              PriceScope(snapshot.Scope),
+		Provider:           snapshot.Provider,
+		Currency:           snapshot.Currency,
+		FormulaKind:        snapshot.FormulaKind,
+		PriceExpr:          snapshot.PriceExpr,
+		ExprVersion:        snapshot.ExprVersion,
+		EffectiveAt:        snapshot.EffectiveAt,
+		Fingerprint:        snapshot.Fingerprint,
+	}
+	if snapshot.Metadata != "" {
+		metadata := map[string]string{}
+		if err := common.UnmarshalJsonStr(snapshot.Metadata, &metadata); err == nil {
+			price.Metadata = metadata
+		}
+	}
+	return price
 }
 
 // ---------------------------------------------------------------------------
