@@ -61,15 +61,12 @@ export const PRICE_SOURCE_FORM_DEFAULTS: PriceSourceFormValues = {
 
 /**
  * Whether a source carries a channel id. `ValidatePriceSourceForWrite` requires
- * one for `supplier_cost` and refuses one for every other role, so the selected
- * role decides even for an adapter that admits several roles. The adapter's
- * `requires_channel` says the same thing whenever it admits only one role.
+ * one for `supplier_cost` and refuses one for every other role, and it is the
+ * only authority on that rule — so the selected role decides here too, with no
+ * second signal from the adapter.
  */
-export function priceSourceUsesChannel(
-  role: string,
-  adapter?: PriceAdapterView
-): boolean {
-  return role === PRICE_ROLE_SUPPLIER_COST || adapter?.requires_channel === true
+export function priceSourceUsesChannel(role: string): boolean {
+  return role === PRICE_ROLE_SUPPLIER_COST
 }
 
 export function findPriceAdapter(
@@ -132,7 +129,7 @@ export function getPriceSourceFormSchema(
         })
       }
 
-      if (priceSourceUsesChannel(values.role, adapter)) {
+      if (priceSourceUsesChannel(values.role)) {
         const channelId = Number.parseInt(values.channel_id, 10)
         if (!Number.isInteger(channelId) || channelId <= 0) {
           ctx.addIssue({
@@ -208,11 +205,10 @@ export function priceSourceToFormValues(
  * the form, because the server refuses a channel on any non-supplier role.
  */
 export function formValuesToPriceSourcePayload(
-  values: PriceSourceFormValues,
-  adapter?: PriceAdapterView
+  values: PriceSourceFormValues
 ): PriceSourceRequest {
   const channelId = Number.parseInt(values.channel_id, 10)
-  const usesChannel = priceSourceUsesChannel(values.role, adapter)
+  const usesChannel = priceSourceUsesChannel(values.role)
 
   return {
     name: values.name.trim(),
