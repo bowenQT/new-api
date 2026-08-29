@@ -175,7 +175,7 @@ const COMPARE_QUERY_KEY = ['price-catalog', 'compare'] as const
 export const priceCatalogQueryKeys = {
   sources: ['price-catalog', 'sources'] as const,
   adapters: ['price-catalog', 'adapters'] as const,
-  currentPrices: ['price-catalog', 'current-prices'] as const,
+  sourceAlerts: ['price-catalog', 'source-alerts'] as const,
   compareAll: COMPARE_QUERY_KEY,
   compare: (group: string, usageKey: string, modelsKey: string) =>
     [...COMPARE_QUERY_KEY, group, usageKey, modelsKey] as const,

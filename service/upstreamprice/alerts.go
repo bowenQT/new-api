@@ -117,6 +117,23 @@ func EvaluateSourceAlerts(sources []*model.PriceSource, now int64) ([]dto.Upstre
 	return alerts, nil
 }
 
+// ListSourceAlerts returns the source-level alerts of every registered source.
+// It is the same evaluation the catalog projection appends to its response, so
+// a client that only needs the health signals does not have to project the
+// whole catalog to get them.
+func ListSourceAlerts() (*dto.UpstreamPriceSourceAlertsResponse, error) {
+	sources, err := model.GetAllPriceSources()
+	if err != nil {
+		return nil, err
+	}
+	now := common.GetTimestamp()
+	alerts, err := EvaluateSourceAlerts(sources, now)
+	if err != nil {
+		return nil, err
+	}
+	return &dto.UpstreamPriceSourceAlertsResponse{GeneratedAt: now, Alerts: alerts}, nil
+}
+
 // coverageGateRefused reports whether a run is a failed run the coverage gate
 // refused, as opposed to a fetch failure, a zero-observation run, or a
 // pre-plan failure.

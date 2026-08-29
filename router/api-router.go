@@ -236,6 +236,7 @@ func SetApiRouter(router *gin.Engine) {
 		{
 			upstreamPriceSourceRoute.GET("", controller.GetUpstreamPriceSources)
 			upstreamPriceSourceRoute.GET("/adapters", controller.GetUpstreamPriceAdapters)
+			upstreamPriceSourceRoute.GET("/alerts", controller.GetUpstreamPriceSourceAlerts)
 			upstreamPriceSourceRoute.POST("", controller.CreateUpstreamPriceSource)
 			upstreamPriceSourceRoute.PUT("/:id", controller.UpdateUpstreamPriceSource)
 			upstreamPriceSourceRoute.POST("/:id/preview", controller.PreviewUpstreamPriceSource)

@@ -38,7 +38,11 @@ import {
 import { formatTimestampToDate } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
-import { getCurrentPrices, listPriceSources, updatePriceSource } from '../api'
+import {
+  listPriceSourceAlerts,
+  listPriceSources,
+  updatePriceSource,
+} from '../api'
 import {
   ADAPTER_LABELS,
   ALERT_SOURCE_CONFIG_CHANGED,
@@ -81,12 +85,13 @@ export function PriceSourcesPanel() {
   })
 
   // Coverage, freshness and the last successful run come from the source list
-  // itself (spec §8.3). Only the catalog health alerts still need the
-  // current-price projection, because no per-source endpoint carries them.
+  // itself (spec §8.3), and the health alerts from the source-alerts endpoint.
+  // Neither needs the current-price projection, so opening this page no longer
+  // projects a row per model.
   const alertsQuery = useQuery({
-    queryKey: priceCatalogQueryKeys.currentPrices,
+    queryKey: priceCatalogQueryKeys.sourceAlerts,
     queryFn: async () => {
-      const res = await getCurrentPrices()
+      const res = await listPriceSourceAlerts()
       if (!res.success || !res.data) {
         throw new Error(
           res.message || t('We could not load the price catalog.')
@@ -105,7 +110,7 @@ export function PriceSourcesPanel() {
       queryKey: priceCatalogQueryKeys.sources,
     })
     void queryClient.invalidateQueries({
-      queryKey: priceCatalogQueryKeys.currentPrices,
+      queryKey: priceCatalogQueryKeys.sourceAlerts,
     })
     void queryClient.invalidateQueries({
       queryKey: priceCatalogQueryKeys.compareAll,

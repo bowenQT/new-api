@@ -20,7 +20,6 @@ import { api } from '@/lib/api'
 
 import type {
   ApiEnvelope,
-  CurrentPriceResponse,
   PriceAdapterView,
   PriceCompareRequest,
   PriceCompareResponse,
@@ -28,6 +27,7 @@ import type {
   PriceSourceRequest,
   PriceSourceView,
   PriceSyncResponse,
+  SourceAlertsResponse,
 } from './types'
 
 /**
@@ -94,12 +94,15 @@ export async function syncPriceSource(
   return res.data
 }
 
-export async function getCurrentPrices(
-  sourceId?: number
-): Promise<ApiEnvelope<CurrentPriceResponse>> {
-  const res = await api.get('/api/upstream-prices/current', {
-    params: sourceId === undefined ? undefined : { source_id: sourceId },
-  })
+/**
+ * The source-level catalog health alerts on their own (spec §13). The source
+ * list renders them without the current-price projection, which carries a row
+ * per model and is far more than the alert bar needs.
+ */
+export async function listPriceSourceAlerts(): Promise<
+  ApiEnvelope<SourceAlertsResponse>
+> {
+  const res = await api.get('/api/upstream-price-sources/alerts')
   return res.data
 }
 
