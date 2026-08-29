@@ -3,6 +3,7 @@ package upstreamprice
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
@@ -296,24 +297,21 @@ func LogCatalogAlertsAfterWrite(ctx context.Context, sourceId int, canonicalMode
 // run over the whole catalog: a manual commit is an interactive request, and a
 // model no sync touched cannot have changed its cost. Models are compared in
 // request-sized batches so a source larger than the per-request cap is still
-// covered end to end.
+// covered end to end, but the batches share one projection basis: the batch
+// size is the unit the comparison is specified in, not a reason to re-read the
+// whole catalog and re-evaluate every source alert per batch.
 func logCostInversionAlerts(ctx context.Context, canonicalModels []string) {
-	for start := 0; start < len(canonicalModels); start += dto.MaxCompareModelsRequested {
-		end := start + dto.MaxCompareModelsRequested
-		if end > len(canonicalModels) {
-			end = len(canonicalModels)
-		}
-		comparison, err := CompareUpstreamPrices(&dto.UpstreamPriceCompareRequest{Models: canonicalModels[start:end]})
-		if err != nil {
-			common.SysError(fmt.Sprintf("upstream price cost inversion check failed: %v", err))
-			return
-		}
-		inversions := make([]dto.UpstreamPriceAlert, 0)
-		for _, alert := range comparison.Alerts {
-			if alert.Code == AlertCostInversion {
-				inversions = append(inversions, alert)
-			}
-		}
+	if len(canonicalModels) == 0 {
+		return
+	}
+	basis, _, err := newCompareBasis("", nil)
+	if err != nil {
+		common.SysError(fmt.Sprintf("upstream price cost inversion check failed: %v", err))
+		return
+	}
+	for batch := range slices.Chunk(canonicalModels, dto.MaxCompareModelsRequested) {
+		names, _, _ := selectCompareModels(batch, "", basis.pricesByModel)
+		_, inversions := basis.compare(names)
 		LogPriceCatalogAlerts(ctx, inversions)
 	}
 }

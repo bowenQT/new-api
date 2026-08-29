@@ -147,6 +147,92 @@ func boundedUSD(value float64) (float64, bool) {
 	return value, true
 }
 
+// compareBasis is everything a comparison needs besides the model list: the
+// sale group it projects against, the usage vector it applies, and the catalog
+// prices it compares, indexed by canonical model name. The comparison endpoint
+// builds one per request and the post-write cost inversion check builds one and
+// reuses it for every batch of models, so both resolve the group, refuse the
+// same unusable group ratios, project the catalog the same way, and describe an
+// inversion identically.
+type compareBasis struct {
+	group           string
+	groupRatio      float64
+	groupConfigured bool
+	usage           appliedUsage
+	params          billingexpr.TokenParams
+	pricesByModel   map[string][]dto.UpstreamCurrentPriceEntry
+}
+
+// newCompareBasis resolves the sale group and usage vector of one comparison
+// and projects the catalog it compares against. The group is resolved before
+// the catalog is read, so a group whose ratio is not a usable multiplier is
+// refused on that ground rather than silently projected at 1 — a corrupt group
+// ratio would otherwise turn every margin computed against it into a fiction.
+//
+// The catalog is projected without its own alert evaluation; the registered
+// sources are returned alongside the basis because a caller that reports source
+// alerts must evaluate them over the same set this projection covered.
+func newCompareBasis(requestedGroup string, requestedUsage *dto.UpstreamPriceUsageVector) (*compareBasis, []*model.PriceSource, error) {
+	group := strings.TrimSpace(requestedGroup)
+	if group == "" {
+		group = DefaultCompareGroup
+	}
+	groupRatio := float64(1)
+	groupConfigured := ratio_setting.ContainsGroupRatio(group)
+	if groupConfigured {
+		groupRatio = ratio_setting.GetGroupRatio(group)
+	}
+	if _, ok := boundedUSD(groupRatio); !ok || groupRatio < 0 {
+		return nil, nil, fmt.Errorf("group %q has an unusable group ratio", group)
+	}
+
+	sources, err := model.GetAllPriceSources()
+	if err != nil {
+		return nil, nil, err
+	}
+	catalogEntries, err := currentPriceEntries(sources, common.GetTimestamp())
+	if err != nil {
+		return nil, nil, err
+	}
+	pricesByModel := make(map[string][]dto.UpstreamCurrentPriceEntry)
+	for _, entry := range catalogEntries {
+		if entry.CanonicalModelName == "" {
+			continue
+		}
+		pricesByModel[entry.CanonicalModelName] = append(pricesByModel[entry.CanonicalModelName], entry)
+	}
+
+	usage := resolveUsage(requestedUsage)
+	return &compareBasis{
+		group:           group,
+		groupRatio:      groupRatio,
+		groupConfigured: groupConfigured,
+		usage:           usage,
+		params:          usage.tokenParams(),
+		pricesByModel:   pricesByModel,
+	}, sources, nil
+}
+
+// compare builds the comparison entries of the named models together with the
+// cost inversion alerts they raise.
+func (b *compareBasis) compare(modelNames []string) ([]dto.UpstreamPriceCompareEntry, []dto.UpstreamPriceAlert) {
+	entries := make([]dto.UpstreamPriceCompareEntry, 0, len(modelNames))
+	alerts := make([]dto.UpstreamPriceAlert, 0)
+	for _, modelName := range modelNames {
+		entry := buildCompareEntry(modelName, b.pricesByModel[modelName], b.params, b.usage, b.groupRatio)
+		if entry.CostInverted {
+			alerts = append(alerts, dto.UpstreamPriceAlert{
+				Code:               AlertCostInversion,
+				CanonicalModelName: modelName,
+				Detail:             fmt.Sprintf("worst cost exceeds the projected sale price for group %q", b.group),
+				Params:             &dto.UpstreamPriceAlertParams{Group: b.group},
+			})
+		}
+		entries = append(entries, entry)
+	}
+	return entries, alerts
+}
+
 // CompareUpstreamPrices projects the current sale price, every catalog cost,
 // and the resulting estimated margin for the requested models onto one usage
 // vector (spec §9.2, §9.3).
@@ -158,71 +244,30 @@ func CompareUpstreamPrices(request *dto.UpstreamPriceCompareRequest) (*dto.Upstr
 		return nil, err
 	}
 
-	group := strings.TrimSpace(request.Group)
-	if group == "" {
-		group = DefaultCompareGroup
-	}
-	groupRatio := float64(1)
-	groupConfigured := ratio_setting.ContainsGroupRatio(group)
-	if groupConfigured {
-		groupRatio = ratio_setting.GetGroupRatio(group)
-	}
-	if _, ok := boundedUSD(groupRatio); !ok || groupRatio < 0 {
-		return nil, fmt.Errorf("group %q has an unusable group ratio", group)
-	}
-
-	usage := resolveUsage(request.Usage)
-	params := usage.tokenParams()
-
-	// The catalog is projected without its own alert evaluation: the comparison
-	// raises the source alerts once, at the end, against the timestamp it
-	// reports as GeneratedAt.
-	sources, err := model.GetAllPriceSources()
+	basis, sources, err := newCompareBasis(request.Group, request.Usage)
 	if err != nil {
 		return nil, err
 	}
-	catalogEntries, err := currentPriceEntries(sources, common.GetTimestamp())
-	if err != nil {
-		return nil, err
-	}
-	pricesByModel := make(map[string][]dto.UpstreamCurrentPriceEntry)
-	for _, entry := range catalogEntries {
-		if entry.CanonicalModelName == "" {
-			continue
-		}
-		pricesByModel[entry.CanonicalModelName] = append(pricesByModel[entry.CanonicalModelName], entry)
-	}
+	modelNames, total, truncated := selectCompareModels(request.Models, request.ModelFilter, basis.pricesByModel)
 
-	modelNames, total, truncated := selectCompareModels(request.Models, request.ModelFilter, pricesByModel)
-
+	generatedAt := common.GetTimestamp()
+	entries, alerts := basis.compare(modelNames)
 	response := &dto.UpstreamPriceCompareResponse{
-		GeneratedAt:          common.GetTimestamp(),
-		Group:                group,
-		GroupRatio:           groupRatio,
-		GroupRatioConfigured: groupConfigured,
+		GeneratedAt:          generatedAt,
+		Group:                basis.group,
+		GroupRatio:           basis.groupRatio,
+		GroupRatioConfigured: basis.groupConfigured,
 		Usage: dto.UpstreamPriceAppliedUsage{
-			PromptTokens:        usage.P,
-			CompletionTokens:    usage.C,
-			CacheReadTokens:     usage.CR,
-			CacheCreationTokens: usage.CC,
+			PromptTokens:        basis.usage.P,
+			CompletionTokens:    basis.usage.C,
+			CacheReadTokens:     basis.usage.CR,
+			CacheCreationTokens: basis.usage.CC,
 		},
 		TotalModels:     total,
 		Truncated:       truncated,
 		ExcludedFactors: append([]string{}, compareExcludedFactors...),
-		Entries:         make([]dto.UpstreamPriceCompareEntry, 0, len(modelNames)),
-		Alerts:          make([]dto.UpstreamPriceAlert, 0),
-	}
-	for _, modelName := range modelNames {
-		entry := buildCompareEntry(modelName, pricesByModel[modelName], params, usage, groupRatio)
-		if entry.CostInverted {
-			response.Alerts = append(response.Alerts, dto.UpstreamPriceAlert{
-				Code:               AlertCostInversion,
-				CanonicalModelName: modelName,
-				Detail:             fmt.Sprintf("worst cost exceeds the projected sale price for group %q", group),
-				Params:             &dto.UpstreamPriceAlertParams{Group: group},
-			})
-		}
-		response.Entries = append(response.Entries, entry)
+		Entries:         entries,
+		Alerts:          alerts,
 	}
 
 	sourceAlerts, err := EvaluateSourceAlerts(sources, response.GeneratedAt)
