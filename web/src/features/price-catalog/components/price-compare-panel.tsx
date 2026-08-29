@@ -74,9 +74,10 @@ export function PriceComparePanel() {
   )
   const [group, setGroup] = useState(DEFAULT_COMPARE_GROUP)
   // The filter is submitted to the server, because the response is capped at
-  // MAX_COMPARE_MODELS: filtering only what came back would search the first
-  // page of a truncated catalog. The draft still narrows the rendered rows
-  // immediately, as a second pass inside the returned page.
+  // 500 models (`upstreamprice.MaxCompareModels`, the backend authority):
+  // filtering only what came back would search the first page of a truncated
+  // catalog. The draft still narrows the rendered rows immediately, as a second
+  // pass inside the returned page.
   const [draftModelFilter, setDraftModelFilter] = useState('')
   const [appliedModelFilter, setAppliedModelFilter] = useState('')
 

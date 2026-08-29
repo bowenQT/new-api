@@ -26,9 +26,6 @@ export const MIN_SCHEDULE_INTERVAL_SECONDS = 6 * 60 * 60
 /** Default interval offered for a newly scheduled source. */
 export const DEFAULT_SCHEDULE_INTERVAL_SECONDS = 24 * 60 * 60
 
-/** `upstreamprice.MaxCompareModels` — the comparison response cap. */
-export const MAX_COMPARE_MODELS = 500
-
 /** `dto.MaxCompareModelFilterLength` — bound of the server-side model filter. */
 export const MAX_COMPARE_MODEL_FILTER_LENGTH = 255
 
@@ -205,5 +202,4 @@ export const priceCatalogQueryKeys = {
   compare: (group: string, usageKey: string, modelsKey: string) =>
     [...COMPARE_QUERY_KEY, group, usageKey, modelsKey] as const,
   groups: ['price-catalog', 'groups'] as const,
-  channels: ['price-catalog', 'channels'] as const,
 }

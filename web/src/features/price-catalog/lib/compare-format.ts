@@ -37,11 +37,12 @@ export function formatUsdAmount(value: number | null | undefined): string {
 }
 
 /**
- * Renders a margin rate. The backend omits the rate when the projected sale
- * price is 0 (spec §9.2), so an absent rate must stay blank and must never be
- * shown as infinity.
+ * Renders a rate the catalog reports as a fraction — a margin rate, a coverage
+ * drop gate, a price movement — as a percentage. The backend omits the margin
+ * rate when the projected sale price is 0 (spec §9.2), so an absent rate must
+ * stay blank and must never be shown as infinity.
  */
-export function formatMarginRate(value: number | null | undefined): string {
+export function formatPercentRate(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) {
     return '—'
   }
