@@ -45,6 +45,7 @@ import {
   MIN_SCHEDULE_INTERVAL_SECONDS,
   priceCatalogQueryKeys,
 } from '../constants'
+import { priceAlertDetail } from '../lib/alert-detail'
 import {
   formValuesToPriceSourcePayload,
   priceSourceToFormValues,
@@ -312,7 +313,7 @@ export function PriceSourcesPanel() {
                                 key={`${alert.code}-${alert.detail}`}
                                 className='text-destructive text-[11px]'
                               >
-                                {alert.detail}
+                                {priceAlertDetail(t, alert)}
                               </div>
                             ))}
                           </div>

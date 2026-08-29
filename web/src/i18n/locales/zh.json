@@ -5486,6 +5486,12 @@
     "Scope is required": "必须选择作用域",
     "This adapter does not allow the selected role": "该适配器不允许所选的角色",
     "This adapter does not allow the selected scope": "该适配器不允许所选的作用域",
-    "Catalog health alerts could not be loaded, so this list may be missing warnings.": "价目健康告警未能加载，此列表可能缺少警告信息。"
+    "Catalog health alerts could not be loaded, so this list may be missing warnings.": "价目健康告警未能加载，此列表可能缺少警告信息。",
+    "The last {{failures}} sync runs failed.": "最近 {{failures}} 次同步运行全部失败。",
+    "The last successful run is {{age}} hours old, past the {{threshold}} hour staleness threshold.": "最近一次成功运行已过去 {{age}} 小时，超过 {{threshold}} 小时的过期阈值。",
+    "The source configuration changed after run #{{runId}}; its prices are not confirmed until the next successful sync.": "来源配置在运行 #{{runId}} 之后发生变更，其价格在下次同步成功前不作为已确认成本。",
+    "Valid model coverage fell from {{previous}} to {{current}} models, past the {{gate}} drop gate.": "有效模型覆盖数从 {{previous}} 降至 {{current}}，超过 {{gate}} 的下降门禁。",
+    "The worst catalog cost exceeds the projected sale price for group {{group}}.": "分组 {{group}} 的最差成本已超过其预估售价。",
+    "The coverage gate refused run #{{runId}}. Valid model coverage would have fallen from {{previous}} to {{current}} models, past the {{gate}} drop gate, so nothing was written.": "覆盖率门禁拒绝了运行 #{{runId}}。有效模型覆盖数将从 {{previous}} 降至 {{current}}，超过 {{gate}} 的下降门禁，因此本次未写入任何数据。"
   }
 }

@@ -5486,6 +5486,12 @@
     "Scope is required": "La portée est requise",
     "This adapter does not allow the selected role": "Cet adaptateur n'autorise pas le rôle sélectionné",
     "This adapter does not allow the selected scope": "Cet adaptateur n'autorise pas la portée sélectionnée",
-    "Catalog health alerts could not be loaded, so this list may be missing warnings.": "Les alertes de santé du catalogue n'ont pas pu être chargées ; cette liste peut omettre des avertissements."
+    "Catalog health alerts could not be loaded, so this list may be missing warnings.": "Les alertes de santé du catalogue n'ont pas pu être chargées ; cette liste peut omettre des avertissements.",
+    "The last {{failures}} sync runs failed.": "Les {{failures}} dernières exécutions de synchronisation ont échoué.",
+    "The last successful run is {{age}} hours old, past the {{threshold}} hour staleness threshold.": "La dernière exécution réussie remonte à {{age}} heures, au-delà du seuil de péremption de {{threshold}} heures.",
+    "The source configuration changed after run #{{runId}}; its prices are not confirmed until the next successful sync.": "La configuration de la source a changé après l'exécution n° {{runId}} ; ses prix ne sont pas confirmés avant la prochaine synchronisation réussie.",
+    "Valid model coverage fell from {{previous}} to {{current}} models, past the {{gate}} drop gate.": "La couverture des modèles valides est passée de {{previous}} à {{current}}, au-delà du seuil de baisse de {{gate}}.",
+    "The worst catalog cost exceeds the projected sale price for group {{group}}.": "Le pire coût du catalogue dépasse le prix de vente projeté pour le groupe {{group}}.",
+    "The coverage gate refused run #{{runId}}. Valid model coverage would have fallen from {{previous}} to {{current}} models, past the {{gate}} drop gate, so nothing was written.": "Le seuil de couverture a refusé l'exécution n° {{runId}}. La couverture des modèles valides serait passée de {{previous}} à {{current}}, au-delà du seuil de baisse de {{gate}}, donc rien n'a été écrit."
   }
 }

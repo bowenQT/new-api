@@ -5486,6 +5486,12 @@
     "Scope is required": "スコープは必須です",
     "This adapter does not allow the selected role": "このアダプターは選択されたロールを許可していません",
     "This adapter does not allow the selected scope": "このアダプターは選択されたスコープを許可していません",
-    "Catalog health alerts could not be loaded, so this list may be missing warnings.": "カタログのヘルスアラートを読み込めなかったため、この一覧には警告が欠けている可能性があります。"
+    "Catalog health alerts could not be loaded, so this list may be missing warnings.": "カタログのヘルスアラートを読み込めなかったため、この一覧には警告が欠けている可能性があります。",
+    "The last {{failures}} sync runs failed.": "直近 {{failures}} 回の同期実行がすべて失敗しました。",
+    "The last successful run is {{age}} hours old, past the {{threshold}} hour staleness threshold.": "最後に成功した実行から {{age}} 時間が経過しており、{{threshold}} 時間の失効しきい値を超えています。",
+    "The source configuration changed after run #{{runId}}; its prices are not confirmed until the next successful sync.": "実行 #{{runId}} の後にソース設定が変更されました。次回の同期が成功するまで、その価格は確定コストとして扱われません。",
+    "Valid model coverage fell from {{previous}} to {{current}} models, past the {{gate}} drop gate.": "有効モデル数が {{previous}} から {{current}} へ減少し、{{gate}} の低下ゲートを超えました。",
+    "The worst catalog cost exceeds the projected sale price for group {{group}}.": "グループ {{group}} で最悪ケースのコストが想定販売価格を上回っています。",
+    "The coverage gate refused run #{{runId}}. Valid model coverage would have fallen from {{previous}} to {{current}} models, past the {{gate}} drop gate, so nothing was written.": "カバレッジゲートが実行 #{{runId}} を拒否しました。有効モデル数が {{previous}} から {{current}} へ減少し、{{gate}} の低下ゲートを超えるため、何も書き込まれていません。"
   }
 }

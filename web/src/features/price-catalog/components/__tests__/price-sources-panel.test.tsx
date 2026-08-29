@@ -174,6 +174,7 @@ describe('price sources panel', () => {
           source_name: 'Vercel gateway cost',
           detail:
             'source configuration changed after run 7; its prices are not confirmed until the next successful sync',
+          params: { run_id: 7 },
         },
       ]
     )
@@ -184,6 +185,13 @@ describe('price sources panel', () => {
     expect(
       row.getByText(
         'Source configuration changed, cost is not confirmed until the next sync'
+      )
+    ).toBeInTheDocument()
+    // The per-source line is rendered from the alert parameters, so the
+    // backend's English sentence never reaches a localized page.
+    expect(
+      row.getByText(
+        'The source configuration changed after run #7; its prices are not confirmed until the next successful sync.'
       )
     ).toBeInTheDocument()
   })

@@ -5486,6 +5486,12 @@
     "Scope is required": "Scope is required",
     "This adapter does not allow the selected role": "This adapter does not allow the selected role",
     "This adapter does not allow the selected scope": "This adapter does not allow the selected scope",
-    "Catalog health alerts could not be loaded, so this list may be missing warnings.": "Catalog health alerts could not be loaded, so this list may be missing warnings."
+    "Catalog health alerts could not be loaded, so this list may be missing warnings.": "Catalog health alerts could not be loaded, so this list may be missing warnings.",
+    "The last {{failures}} sync runs failed.": "The last {{failures}} sync runs failed.",
+    "The last successful run is {{age}} hours old, past the {{threshold}} hour staleness threshold.": "The last successful run is {{age}} hours old, past the {{threshold}} hour staleness threshold.",
+    "The source configuration changed after run #{{runId}}; its prices are not confirmed until the next successful sync.": "The source configuration changed after run #{{runId}}; its prices are not confirmed until the next successful sync.",
+    "Valid model coverage fell from {{previous}} to {{current}} models, past the {{gate}} drop gate.": "Valid model coverage fell from {{previous}} to {{current}} models, past the {{gate}} drop gate.",
+    "The worst catalog cost exceeds the projected sale price for group {{group}}.": "The worst catalog cost exceeds the projected sale price for group {{group}}.",
+    "The coverage gate refused run #{{runId}}. Valid model coverage would have fallen from {{previous}} to {{current}} models, past the {{gate}} drop gate, so nothing was written.": "The coverage gate refused run #{{runId}}. Valid model coverage would have fallen from {{previous}} to {{current}} models, past the {{gate}} drop gate, so nothing was written."
   }
 }

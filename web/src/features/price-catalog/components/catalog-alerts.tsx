@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 
 import { ALERT_LABEL_KEYS } from '../constants'
+import { priceAlertDetail } from '../lib/alert-detail'
 import type { PriceAlert } from '../types'
 
 /**
@@ -55,7 +56,10 @@ export function CatalogAlerts(props: { alerts: PriceAlert[] }) {
               {alert.canonical_model_name
                 ? ` · ${alert.canonical_model_name}`
                 : ''}
-              <span className='text-muted-foreground'> — {alert.detail}</span>
+              <span className='text-muted-foreground'>
+                {' — '}
+                {priceAlertDetail(t, alert)}
+              </span>
             </li>
           ))}
         </ul>

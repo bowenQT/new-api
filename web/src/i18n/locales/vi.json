@@ -5486,6 +5486,12 @@
     "Scope is required": "Bắt buộc chọn phạm vi",
     "This adapter does not allow the selected role": "Bộ điều hợp này không cho phép vai trò đã chọn",
     "This adapter does not allow the selected scope": "Bộ điều hợp này không cho phép phạm vi đã chọn",
-    "Catalog health alerts could not be loaded, so this list may be missing warnings.": "Không thể tải cảnh báo tình trạng danh mục, vì vậy danh sách này có thể thiếu cảnh báo."
+    "Catalog health alerts could not be loaded, so this list may be missing warnings.": "Không thể tải cảnh báo tình trạng danh mục, vì vậy danh sách này có thể thiếu cảnh báo.",
+    "The last {{failures}} sync runs failed.": "{{failures}} lần chạy đồng bộ gần nhất đều thất bại.",
+    "The last successful run is {{age}} hours old, past the {{threshold}} hour staleness threshold.": "Lần chạy thành công gần nhất đã cách đây {{age}} giờ, vượt ngưỡng cũ {{threshold}} giờ.",
+    "The source configuration changed after run #{{runId}}; its prices are not confirmed until the next successful sync.": "Cấu hình nguồn đã thay đổi sau lần chạy #{{runId}}; giá của nó chưa được xác nhận cho đến lần đồng bộ thành công tiếp theo.",
+    "Valid model coverage fell from {{previous}} to {{current}} models, past the {{gate}} drop gate.": "Độ phủ mô hình hợp lệ đã giảm từ {{previous}} xuống {{current}}, vượt ngưỡng giảm {{gate}}.",
+    "The worst catalog cost exceeds the projected sale price for group {{group}}.": "Chi phí xấu nhất trong danh mục vượt giá bán dự kiến cho nhóm {{group}}.",
+    "The coverage gate refused run #{{runId}}. Valid model coverage would have fallen from {{previous}} to {{current}} models, past the {{gate}} drop gate, so nothing was written.": "Cổng độ phủ đã từ chối lần chạy #{{runId}}. Độ phủ mô hình hợp lệ sẽ giảm từ {{previous}} xuống {{current}}, vượt ngưỡng giảm {{gate}}, nên không có dữ liệu nào được ghi."
   }
 }

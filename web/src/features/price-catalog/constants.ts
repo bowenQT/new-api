@@ -88,12 +88,18 @@ export const SCOPE_LABEL_KEYS: Record<string, string> = {
  */
 export const ALERT_SOURCE_CONFIG_CHANGED = 'source_config_changed'
 
+/** Remaining catalog health alert codes (`service/upstreamprice/alerts.go`). */
+export const ALERT_SOURCE_CONSECUTIVE_FAILURES = 'source_consecutive_failures'
+export const ALERT_SOURCE_STALE = 'source_stale'
+export const ALERT_COVERAGE_DROP = 'coverage_drop'
+export const ALERT_COST_INVERSION = 'cost_inversion'
+
 /** Catalog health alert codes (`service/upstreamprice/alerts.go`, spec §13). */
 export const ALERT_LABEL_KEYS: Record<string, string> = {
-  source_consecutive_failures: 'Source failed repeatedly',
-  source_stale: 'Cost source is stale',
-  coverage_drop: 'Model coverage dropped',
-  cost_inversion: 'Cost exceeds the projected sale price',
+  [ALERT_SOURCE_CONSECUTIVE_FAILURES]: 'Source failed repeatedly',
+  [ALERT_SOURCE_STALE]: 'Cost source is stale',
+  [ALERT_COVERAGE_DROP]: 'Model coverage dropped',
+  [ALERT_COST_INVERSION]: 'Cost exceeds the projected sale price',
   [ALERT_SOURCE_CONFIG_CHANGED]: 'Source configuration changed',
 }
 

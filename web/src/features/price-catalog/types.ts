@@ -146,13 +146,39 @@ export interface PriceSyncResponse {
   error_summary?: string
 }
 
-/** `dto.UpstreamPriceAlert` */
+/**
+ * `dto.UpstreamPriceAlertParams`. Only the fields documented for the alert's
+ * own code are sent, so every field is optional here and a renderer must check
+ * the ones it reads before using them.
+ */
+export interface PriceAlertParams {
+  failure_count?: number
+  run_id?: number
+  age_seconds?: number
+  threshold_seconds?: number
+  previous_valid_count?: number
+  valid_count?: number
+  drop_threshold?: number
+  /**
+   * The coverage gate actually refused the run (it committed nothing), as
+   * opposed to a drop observed between two runs that both committed.
+   */
+  gate_refused?: boolean
+  group?: string
+}
+
+/**
+ * `dto.UpstreamPriceAlert`. `detail` is the backend's English sentence; it is
+ * only rendered when `params` is absent, because the localized message is built
+ * from `params` (see `lib/alert-detail.ts`).
+ */
 export interface PriceAlert {
   code: string
   source_id?: number
   source_name?: string
   canonical_model_name?: string
   detail: string
+  params?: PriceAlertParams
 }
 
 /** `dto.UpstreamCurrentPriceEntry` */
