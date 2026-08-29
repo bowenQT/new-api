@@ -16,16 +16,18 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { createInstance } from 'i18next'
 import { I18nextProvider, initReactI18next } from 'react-i18next'
 import { afterEach, describe, expect, test } from 'vitest'
 
-import { api } from '@/lib/api'
-
 import type { PriceAdapterView, PriceSourceView } from '../../types'
 import { PriceSourceMutateDrawer } from '../price-source-mutate-drawer'
+import {
+  mockApi,
+  renderWithQueryClient,
+  resetCatalogTestEnv,
+} from './test-utils'
 
 // The adapter endpoint is interpolated into a label, so this instance mirrors
 // the app's `escapeValue: false` (src/i18n/config.ts); the shared test setup
@@ -36,14 +38,6 @@ await i18n.use(initReactI18next).init({
   resources: { en: { translation: {} } },
   interpolation: { escapeValue: false },
 })
-
-type ApiMethod = (url: string, data?: unknown) => Promise<{ data: unknown }>
-type MockableApi = { get: ApiMethod; put: ApiMethod }
-
-const apiClient = api as unknown as MockableApi
-const originalGet = apiClient.get
-const originalPut = apiClient.put
-let queryClient: QueryClient | null = null
 
 const VERCEL: PriceAdapterView = {
   key: 'vercel_gateway',
@@ -101,30 +95,25 @@ function existingSource(
 }
 
 function installAdapters(adapters: PriceAdapterView[] | Error) {
-  apiClient.get = async (url) => {
+  mockApi('get', async (url) => {
     if (url !== '/api/upstream-price-sources/adapters') {
       throw new Error(`Unexpected GET ${url}`)
     }
     if (adapters instanceof Error) throw adapters
     return { data: { success: true, data: adapters } }
-  }
+  })
 }
 
 function renderDrawer(source?: PriceSourceView) {
-  queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  })
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <I18nextProvider i18n={i18n}>
-        <PriceSourceMutateDrawer
-          open
-          onOpenChange={() => undefined}
-          source={source}
-          onSaved={() => undefined}
-        />
-      </I18nextProvider>
-    </QueryClientProvider>
+  return renderWithQueryClient(
+    <I18nextProvider i18n={i18n}>
+      <PriceSourceMutateDrawer
+        open
+        onOpenChange={() => undefined}
+        source={source}
+        onSaved={() => undefined}
+      />
+    </I18nextProvider>
   )
 }
 
@@ -144,16 +133,11 @@ function labelText(text: string): HTMLElement | null {
   )
 }
 
-afterEach(() => {
-  apiClient.get = originalGet
-  apiClient.put = originalPut
-  queryClient?.clear()
-  queryClient = null
-})
+afterEach(resetCatalogTestEnv)
 
 describe('price source mutate drawer', () => {
   test('announces that adapters are loading before the registry responds', () => {
-    apiClient.get = () => new Promise(() => undefined)
+    mockApi('get', () => new Promise(() => undefined))
 
     renderDrawer()
 
@@ -235,10 +219,10 @@ describe('price source mutate drawer', () => {
   test('saves a curated reference source with its own role and scope and without a channel', async () => {
     installAdapters([MIXED])
     const payloads: Record<string, unknown>[] = []
-    apiClient.put = async (_url, data) => {
+    mockApi('put', async (_url, data) => {
       payloads.push(data as Record<string, unknown>)
       return { data: { success: true, data: {} } }
-    }
+    })
 
     renderDrawer(existingSource())
     await waitForAdapter(MIXED.endpoint)

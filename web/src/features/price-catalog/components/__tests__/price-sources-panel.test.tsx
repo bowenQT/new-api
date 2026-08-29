@@ -16,29 +16,18 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import {
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-  within,
-} from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, test } from 'vitest'
-
-import { api } from '@/lib/api'
 
 import { priceCatalogQueryKeys } from '../../constants'
 import type { PriceAlert, PriceSourceView } from '../../types'
 import { PriceSourcesPanel } from '../price-sources-panel'
-
-type ApiMethod = (url: string, config?: unknown) => Promise<{ data: unknown }>
-type MockableApi = { get: ApiMethod; put: ApiMethod }
-
-const apiClient = api as unknown as MockableApi
-const originalGet = apiClient.get
-const originalPut = apiClient.put
-let queryClient: QueryClient | null = null
+import {
+  mockApi,
+  renderWithQueryClient,
+  resetCatalogTestEnv,
+  type ApiMethod,
+} from './test-utils'
 
 function priceSource(
   overrides: Partial<PriceSourceView> = {}
@@ -79,8 +68,8 @@ function priceSource(
 function installApi(
   sources: PriceSourceView[] | Error,
   alerts: PriceAlert[] = []
-) {
-  apiClient.get = async (url) => {
+): ApiMethod {
+  const serveGet: ApiMethod = async (url) => {
     if (url === '/api/upstream-price-sources') {
       if (sources instanceof Error) throw sources
       return { data: { success: true, data: sources } }
@@ -95,17 +84,12 @@ function installApi(
     }
     throw new Error(`Unexpected GET ${url}`)
   }
+  mockApi('get', serveGet)
+  return serveGet
 }
 
 function renderPanel() {
-  queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  })
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <PriceSourcesPanel />
-    </QueryClientProvider>
-  )
+  return renderWithQueryClient(<PriceSourcesPanel />)
 }
 
 async function rowOf(name: string): Promise<HTMLElement> {
@@ -115,16 +99,11 @@ async function rowOf(name: string): Promise<HTMLElement> {
   return row
 }
 
-afterEach(() => {
-  apiClient.get = originalGet
-  apiClient.put = originalPut
-  queryClient?.clear()
-  queryClient = null
-})
+afterEach(resetCatalogTestEnv)
 
 describe('price sources panel', () => {
   test('marks the list busy and shows no source rows while the sources request is pending', async () => {
-    apiClient.get = () => new Promise(() => undefined)
+    mockApi('get', () => new Promise(() => undefined))
 
     const { container } = renderPanel()
 
@@ -170,13 +149,12 @@ describe('price sources panel', () => {
   // The health alerts have their own endpoint; rendering the source list must
   // not project the whole current-price catalog to reach them.
   test('reads the alerts from the source-alerts endpoint and never requests the current-price projection', async () => {
-    installApi([priceSource()])
-    const served = apiClient.get
+    const served = installApi([priceSource()])
     const requested: string[] = []
-    apiClient.get = async (url, config) => {
+    mockApi('get', async (url, config) => {
       requested.push(url)
       return served(url, config)
-    }
+    })
 
     renderPanel()
 
@@ -185,6 +163,25 @@ describe('price sources panel', () => {
       expect(requested).toContain('/api/upstream-price-sources/alerts')
     )
     expect(requested).not.toContain('/api/upstream-prices/current')
+  })
+
+  // The mutate drawer stays mounted while closed, so the adapter registry it
+  // needs must not be fetched until the admin actually opens it.
+  test('never requests the adapter registry while the mutate drawer is closed', async () => {
+    const served = installApi([priceSource()])
+    const requested: string[] = []
+    mockApi('get', async (url, config) => {
+      requested.push(url)
+      return served(url, config)
+    })
+
+    renderPanel()
+
+    await rowOf('Vercel gateway cost')
+    await waitFor(() =>
+      expect(requested).toContain('/api/upstream-price-sources/alerts')
+    )
+    expect(requested).not.toContain('/api/upstream-price-sources/adapters')
   })
 
   test('labels a source whose configuration changed after its last successful run', async () => {
@@ -241,11 +238,9 @@ describe('price sources panel', () => {
   // moment a source changes.
   test('invalidates the cached comparisons after a source is toggled', async () => {
     installApi([priceSource()])
-    apiClient.put = async () => ({ data: { success: true } })
+    mockApi('put', async () => ({ data: { success: true } }))
 
-    renderPanel()
-    const client = queryClient
-    if (!client) throw new Error('Expected a query client')
+    const client = renderPanel().queryClient
     const compareKey = priceCatalogQueryKeys.compare('default', '1/1/0/0', '')
     client.setQueryData(compareKey, { generated_at: 1, entries: [] })
 
