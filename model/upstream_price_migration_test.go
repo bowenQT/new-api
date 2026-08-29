@@ -56,6 +56,35 @@ func testUpstreamPriceCatalogMigration(t *testing.T, db *gorm.DB, recorder *migr
 	differentFingerprint.Fingerprint = strings.Repeat("b", 64)
 	require.NoError(t, db.Create(&differentFingerprint).Error)
 
+	// The nullable evidence columns must round-trip on every engine, both left
+	// unset (a run written before the column existed reads back as the zero
+	// value, never a scan failure) and carrying a value.
+	blankRun := PriceSyncRun{SourceId: 1, Status: PriceSyncRunStatusSucceeded, AdapterKey: "vercel_gateway", StartedAt: 1}
+	require.NoError(t, db.Create(&blankRun).Error)
+	var readBlank PriceSyncRun
+	require.NoError(t, db.First(&readBlank, blankRun.Id).Error)
+	assert.Nil(t, readBlank.CoverageDropExceeded)
+	assert.Empty(t, readBlank.PriceJumpSummary)
+
+	gateRefused := true
+	summary := `{"version":1,"probe_version":1,"threshold":0.5,"total":1,"entries":[` +
+		`{"source_model_name":"openai/gpt-5.6-luna","canonical_model_name":"gpt-5.6-luna",` +
+		`"dimension":"input","previous_usd":0.2,"current_usd":2,"change_rate":9}]}`
+	evidenceRun := PriceSyncRun{
+		SourceId:             1,
+		Status:               PriceSyncRunStatusPartial,
+		AdapterKey:           "vercel_gateway",
+		StartedAt:            2,
+		CoverageDropExceeded: &gateRefused,
+		PriceJumpSummary:     summary,
+	}
+	require.NoError(t, db.Create(&evidenceRun).Error)
+	var readEvidence PriceSyncRun
+	require.NoError(t, db.First(&readEvidence, evidenceRun.Id).Error)
+	require.NotNil(t, readEvidence.CoverageDropExceeded)
+	assert.True(t, *readEvidence.CoverageDropExceeded)
+	assert.Equal(t, summary, readEvidence.PriceJumpSummary)
+
 	item := PriceSyncRunItem{RunId: 1, SourceModelName: "openai/gpt-5.6-luna", Status: PriceSyncItemStatusValid}
 	require.NoError(t, db.Create(&item).Error)
 	duplicateItem := PriceSyncRunItem{RunId: 1, SourceModelName: "openai/gpt-5.6-luna", Status: PriceSyncItemStatusRejected}

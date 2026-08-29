@@ -279,9 +279,14 @@ type syncPlan struct {
 	UnchangedCount       int
 	CoverageDropExceeded bool
 	GateThreshold        float64
-	Status               string
-	StartedAt            int64
-	DurationMs           int64
+	// PriceJumps are the price movements this plan measured against the
+	// baseline run (spec §13). They are evidence recorded on the run and never
+	// influence Status: a price movement alerts, it does not refuse a commit.
+	PriceJumps         []priceJumpEntry
+	PriceJumpThreshold float64
+	Status             string
+	StartedAt          int64
+	DurationMs         int64
 }
 
 func coverageDropThreshold(config SourceConfig) float64 {
@@ -446,14 +451,15 @@ func buildSyncPlan(ctx context.Context, source *model.PriceSource) (*syncPlan, e
 	}
 
 	plan := &syncPlan{
-		Source:         config,
-		AdapterKey:     adapter.Key(),
-		Meta:           meta,
-		BaseRunId:      base.RunId,
-		BaseValidCount: base.ValidCount,
-		GateThreshold:  coverageDropThreshold(config),
-		StartedAt:      startedAt,
-		DurationMs:     durationMs,
+		Source:             config,
+		AdapterKey:         adapter.Key(),
+		Meta:               meta,
+		BaseRunId:          base.RunId,
+		BaseValidCount:     base.ValidCount,
+		GateThreshold:      coverageDropThreshold(config),
+		PriceJumpThreshold: priceJumpThreshold(config),
+		StartedAt:          startedAt,
+		DurationMs:         durationMs,
 	}
 
 	// Every model identity is bounded BEFORE any planned/skipped item is
@@ -536,6 +542,11 @@ func buildSyncPlan(ctx context.Context, source *model.PriceSource) (*syncPlan, e
 			item.Change = changeNew
 		} else if baseFingerprint != normalized.Fingerprint {
 			item.Change = changeChanged
+			// A changed fingerprint is the only case where a price can have
+			// moved: a new model has nothing to move from, and an unchanged
+			// one is byte-identical to its baseline snapshot.
+			plan.PriceJumps = append(plan.PriceJumps,
+				evaluatePriceJump(base.Snapshots[obs.SourceModelName], normalized, plan.PriceJumpThreshold)...)
 		} else {
 			item.Change = changeUnchanged
 		}
@@ -611,15 +622,20 @@ func buildNotModifiedPlan(config SourceConfig, adapterKey string, meta FetchMeta
 	if meta.SourceRevision == "" {
 		meta.SourceRevision = base.Run.SourceRevision
 	}
+	// A 304 re-affirms the baseline snapshots byte for byte, so every replayed
+	// item is unchanged and no price can have moved. The replayed run therefore
+	// carries no movement summary — not an empty one standing in for an
+	// unevaluated question, but the correct answer that nothing moved.
 	plan := &syncPlan{
-		Source:         config,
-		AdapterKey:     adapterKey,
-		Meta:           meta,
-		BaseRunId:      base.RunId,
-		BaseValidCount: base.ValidCount,
-		GateThreshold:  coverageDropThreshold(config),
-		StartedAt:      startedAt,
-		DurationMs:     durationMs,
+		Source:             config,
+		AdapterKey:         adapterKey,
+		Meta:               meta,
+		BaseRunId:          base.RunId,
+		BaseValidCount:     base.ValidCount,
+		GateThreshold:      coverageDropThreshold(config),
+		PriceJumpThreshold: priceJumpThreshold(config),
+		StartedAt:          startedAt,
+		DurationMs:         durationMs,
 	}
 	for _, item := range base.Items {
 		switch item.Status {
@@ -782,6 +798,7 @@ func PreviewPriceSource(ctx context.Context, sourceId int) (*dto.UpstreamPricePr
 		ChangedCount:         plan.ChangedCount,
 		UnchangedCount:       plan.UnchangedCount,
 		CoverageDropExceeded: plan.CoverageDropExceeded,
+		PriceJumpCount:       len(plan.PriceJumps),
 		Missing:              append([]string{}, plan.Missing...),
 		PreviewToken:         token,
 		ExpiresAt:            expiresAt,
@@ -1000,6 +1017,7 @@ func commitSyncPlan(ctx context.Context, source *model.PriceSource, plan *syncPl
 		NewSnapshotCount:   run.NewSnapshotCount,
 		IdempotentHitCount: run.IdempotentHitCount,
 		ErrorSummary:       run.ErrorSummary,
+		PriceJumpCount:     len(plan.PriceJumps),
 	}, nil
 }
 
@@ -1047,6 +1065,7 @@ func buildRunFromPlan(plan *syncPlan, errorSummary string) model.PriceSyncRun {
 		MissingCount:         len(plan.Missing),
 		ErrorSummary:         errorSummary,
 		CoverageDropExceeded: &coverageDropExceeded,
+		PriceJumpSummary:     encodePriceJumpSummary(plan.PriceJumpThreshold, plan.PriceJumps),
 	}
 }
 
