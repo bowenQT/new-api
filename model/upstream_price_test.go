@@ -330,6 +330,82 @@ func TestCommitPriceSyncCASConflicts(t *testing.T) {
 	assert.EqualValues(t, 1, snapshotCount)
 }
 
+// TestGetLatestPriceSnapshotsForModelsSelection pins the selection the catalog
+// depends on when it shows the last observed price of a model a source stopped
+// returning: run id is the ordering authority, so the highest last_seen_run_id
+// wins and the lowest snapshot id breaks a tie between rows that share it. A
+// model with no snapshot at all is absent rather than an error, and the whole
+// lookup stays a bounded number of queries instead of one per model.
+func TestGetLatestPriceSnapshotsForModelsSelection(t *testing.T) {
+	db := setupUpstreamPriceDB(t)
+	source := testPriceSource(t)
+
+	seed := func(sourceModelName, fingerprint string, lastSeenRunId int) int {
+		snapshot := testSnapshot(source.Id, sourceModelName, fingerprint, "p * 1")
+		snapshot.LastSeenRunId = lastSeenRunId
+		require.NoError(t, db.Create(snapshot).Error)
+		return snapshot.Id
+	}
+
+	// The newest run wins over an older observation of the same model.
+	seed("openai/model-a", fingerprintA, 10)
+	newestA := seed("openai/model-a", fingerprintB, 20)
+	// Two rows of one model share the newest run: the lowest id wins, which is
+	// what "ORDER BY last_seen_run_id DESC" plus GORM's primary-key tie-break
+	// resolved to before the lookup was batched.
+	tiedB := seed("openai/model-b", fingerprintA, 30)
+	seed("openai/model-b", fingerprintB, 30)
+	onlyC := seed("openai/model-c", fingerprintA, 5)
+
+	snapshotQueries := 0
+	countSnapshotQuery := func(tx *gorm.DB) {
+		if strings.Contains(tx.Statement.SQL.String(), "price_snapshots") {
+			snapshotQueries++
+		}
+	}
+	// The aggregate step runs through Scan, which is a row callback, while the
+	// row step runs through Find; both have to be counted.
+	require.NoError(t, db.Callback().Query().After("gorm:query").Register("test:count_price_snapshots", countSnapshotQuery))
+	require.NoError(t, db.Callback().Row().After("gorm:row").Register("test:count_price_snapshots", countSnapshotQuery))
+	t.Cleanup(func() {
+		_ = db.Callback().Query().After("gorm:query").Remove("test:count_price_snapshots")
+		_ = db.Callback().Row().After("gorm:row").Remove("test:count_price_snapshots")
+	})
+
+	latest, err := GetLatestPriceSnapshotsForModels(source.Id, []string{
+		"openai/model-a", "openai/model-b", "openai/model-c", "openai/never-observed",
+	})
+	require.NoError(t, err)
+
+	require.Len(t, latest, 3)
+	require.NotNil(t, latest["openai/model-a"])
+	assert.Equal(t, newestA, latest["openai/model-a"].Id)
+	require.NotNil(t, latest["openai/model-b"])
+	assert.Equal(t, tiedB, latest["openai/model-b"].Id)
+	require.NotNil(t, latest["openai/model-c"])
+	assert.Equal(t, onlyC, latest["openai/model-c"].Id)
+	assert.NotContains(t, latest, "openai/never-observed")
+
+	assert.Equal(t, 2, snapshotQueries,
+		"four models must cost one aggregate query plus one row query, not one query per model")
+
+	// An empty request never touches the database.
+	empty, err := GetLatestPriceSnapshotsForModels(source.Id, nil)
+	require.NoError(t, err)
+	assert.Empty(t, empty)
+	assert.Equal(t, 2, snapshotQueries)
+
+	// The batched lookup must land on the same rows as the per-model query it
+	// replaced, tie-break included.
+	for _, sourceModelName := range []string{"openai/model-a", "openai/model-b", "openai/model-c"} {
+		reference := &PriceSnapshot{}
+		require.NoError(t, DB.Where("source_id = ? AND source_model_name = ?", source.Id, sourceModelName).
+			Order("last_seen_run_id desc").
+			First(reference).Error)
+		assert.Equal(t, reference.Id, latest[sourceModelName].Id, sourceModelName)
+	}
+}
+
 func TestUpdatePriceSourceCASBumpsRevision(t *testing.T) {
 	setupUpstreamPriceDB(t)
 	source := testPriceSource(t)
@@ -358,9 +434,10 @@ func TestDisabledSourceHistoryRemainsQueryable(t *testing.T) {
 	require.NoError(t, UpdatePriceSourceCAS(source, source.ConfigRevision))
 
 	// Historical snapshots and run details stay readable after disable.
-	snapshot, err := GetLatestPriceSnapshotForModel(source.Id, "openai/gpt-5.6-luna")
+	latest, err := GetLatestPriceSnapshotsForModels(source.Id, []string{"openai/gpt-5.6-luna"})
 	require.NoError(t, err)
-	assert.Equal(t, fingerprintA, snapshot.Fingerprint)
+	require.NotNil(t, latest["openai/gpt-5.6-luna"])
+	assert.Equal(t, fingerprintA, latest["openai/gpt-5.6-luna"].Fingerprint)
 
 	items, err := GetPriceSyncRunItems(run.Id)
 	require.NoError(t, err)

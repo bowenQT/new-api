@@ -3,6 +3,8 @@ package model
 import (
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 
@@ -272,18 +274,78 @@ func GetPriceSnapshotsByIds(ids []int) ([]*PriceSnapshot, error) {
 	return snapshots, err
 }
 
-// GetLatestPriceSnapshotForModel returns the most recently observed snapshot
-// of one source model, ordered by run id (the ordering authority), regardless
-// of whether it is still current. Used to display prices for missing models.
-func GetLatestPriceSnapshotForModel(sourceId int, sourceModelName string) (*PriceSnapshot, error) {
-	snapshot := &PriceSnapshot{}
-	err := DB.Where("source_id = ? AND source_model_name = ?", sourceId, sourceModelName).
-		Order("last_seen_run_id desc").
-		First(snapshot).Error
-	if err != nil {
-		return nil, err
+// priceSnapshotLookupBatchSize bounds how many models one lookup query covers,
+// so a run with thousands of missing models issues a few bounded queries
+// instead of one unbounded condition list.
+const priceSnapshotLookupBatchSize = 200
+
+// GetLatestPriceSnapshotsForModels returns the most recently observed snapshot
+// of each named source model, regardless of whether it is still current. It is
+// what the catalog shows for models a source stopped returning.
+//
+// Selection follows run id, the ordering authority (spec §7.3): the highest
+// last_seen_run_id wins, and the lowest snapshot id breaks a tie between rows
+// that share it. Models with no snapshot at all are absent from the result.
+//
+// The lookup is deliberately two steps — first each model's highest run id,
+// then only the rows at those exact (model, run) pairs — so a model with a long
+// observation history never loads that history into memory.
+func GetLatestPriceSnapshotsForModels(sourceId int, sourceModelNames []string) (map[string]*PriceSnapshot, error) {
+	names := make([]string, 0, len(sourceModelNames))
+	seen := make(map[string]bool, len(sourceModelNames))
+	for _, name := range sourceModelNames {
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		names = append(names, name)
 	}
-	return snapshot, nil
+	if len(names) == 0 {
+		return nil, nil
+	}
+
+	type latestObservation struct {
+		SourceModelName  string
+		MaxLastSeenRunId int
+	}
+	observations := make([]latestObservation, 0, len(names))
+	for batch := range slices.Chunk(names, priceSnapshotLookupBatchSize) {
+		var rows []latestObservation
+		if err := DB.Model(&PriceSnapshot{}).
+			Select("source_model_name, MAX(last_seen_run_id) AS max_last_seen_run_id").
+			Where("source_id = ? AND source_model_name IN ?", sourceId, batch).
+			Group("source_model_name").
+			Scan(&rows).Error; err != nil {
+			return nil, err
+		}
+		observations = append(observations, rows...)
+	}
+
+	latest := make(map[string]*PriceSnapshot, len(observations))
+	for batch := range slices.Chunk(observations, priceSnapshotLookupBatchSize) {
+		conditions := make([]string, 0, len(batch))
+		args := make([]interface{}, 0, len(batch)*2)
+		for _, observation := range batch {
+			conditions = append(conditions, "(source_model_name = ? AND last_seen_run_id = ?)")
+			args = append(args, observation.SourceModelName, observation.MaxLastSeenRunId)
+		}
+		var snapshots []*PriceSnapshot
+		if err := DB.Where("source_id = ?", sourceId).
+			Where("("+strings.Join(conditions, " OR ")+")", args...).
+			Order("id asc").
+			Find(&snapshots).Error; err != nil {
+			return nil, err
+		}
+		// Every model appears in exactly one pair, and the rows come back by
+		// ascending id, so the first row of a model is the lowest id among the
+		// rows sharing its highest run id.
+		for _, snapshot := range snapshots {
+			if _, ok := latest[snapshot.SourceModelName]; !ok {
+				latest[snapshot.SourceModelName] = snapshot
+			}
+		}
+	}
+	return latest, nil
 }
 
 // PriceSyncCommitItem is one prepared run item. Snapshot is only set for

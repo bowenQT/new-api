@@ -1,13 +1,9 @@
 package upstreamprice
 
 import (
-	"errors"
-
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
-
-	"gorm.io/gorm"
 )
 
 // Catalog status values exposed by the current-price query (spec §8.3).
@@ -114,9 +110,13 @@ func currentEntriesForSource(source *model.PriceSource, now int64) ([]dto.Upstre
 	}
 
 	snapshotIds := make([]int, 0, len(items))
+	missingModels := make([]string, 0)
 	for _, item := range items {
 		if item.Status == model.PriceSyncItemStatusValid && item.SnapshotId != nil {
 			snapshotIds = append(snapshotIds, *item.SnapshotId)
+		}
+		if item.Status == model.PriceSyncItemStatusMissing {
+			missingModels = append(missingModels, item.SourceModelName)
 		}
 	}
 	snapshots, err := model.GetPriceSnapshotsByIds(snapshotIds)
@@ -126,6 +126,12 @@ func currentEntriesForSource(source *model.PriceSource, now int64) ([]dto.Upstre
 	snapshotById := make(map[int]*model.PriceSnapshot, len(snapshots))
 	for _, snapshot := range snapshots {
 		snapshotById[snapshot.Id] = snapshot
+	}
+	// Models the source stopped returning keep their last observed snapshot;
+	// they are looked up for the whole run at once, never one query per model.
+	lastSnapshotByModel, err := model.GetLatestPriceSnapshotsForModels(source.Id, missingModels)
+	if err != nil {
+		return nil, err
 	}
 
 	entries := make([]dto.UpstreamCurrentPriceEntry, 0, len(items))
@@ -155,11 +161,7 @@ func currentEntriesForSource(source *model.PriceSource, now int64) ([]dto.Upstre
 			fillEntryFromSnapshot(&entry, snapshot)
 		case model.PriceSyncItemStatusMissing:
 			entry.Status = CatalogStatusMissing
-			lastSnapshot, err := model.GetLatestPriceSnapshotForModel(source.Id, item.SourceModelName)
-			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-				return nil, err
-			}
-			if lastSnapshot != nil {
+			if lastSnapshot := lastSnapshotByModel[item.SourceModelName]; lastSnapshot != nil {
 				fillEntryFromSnapshot(&entry, lastSnapshot)
 			}
 		case model.PriceSyncItemStatusUnsupported:
