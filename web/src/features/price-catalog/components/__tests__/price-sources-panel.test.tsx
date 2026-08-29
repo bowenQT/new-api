@@ -71,10 +71,10 @@ function priceSource(
 }
 
 /**
- * Serves the two GETs the panel makes. The current-price entries are served
- * empty on purpose: coverage, missing and staleness must come from the source
- * list, never from a join against the catalog entries. Only the health alerts
- * come from that projection.
+ * Serves the two GETs the panel makes: the source list, which is the only
+ * authority for coverage, missing count and staleness, and the source-alerts
+ * endpoint. Any other URL throws, so a request for the current-price
+ * projection fails the test rather than being silently served.
  */
 function installApi(
   sources: PriceSourceView[] | Error,
@@ -85,11 +85,11 @@ function installApi(
       if (sources instanceof Error) throw sources
       return { data: { success: true, data: sources } }
     }
-    if (url === '/api/upstream-prices/current') {
+    if (url === '/api/upstream-price-sources/alerts') {
       return {
         data: {
           success: true,
-          data: { generated_at: 1_700_000_000, entries: [], alerts },
+          data: { generated_at: 1_700_000_000, alerts },
         },
       }
     }
@@ -165,6 +165,26 @@ describe('price sources panel', () => {
     expect(row.getByText('2 missing')).toBeInTheDocument()
     expect(row.getByText('Stale')).toBeInTheDocument()
     expect(row.getByText('Missing upstream')).toBeInTheDocument()
+  })
+
+  // The health alerts have their own endpoint; rendering the source list must
+  // not project the whole current-price catalog to reach them.
+  test('reads the alerts from the source-alerts endpoint and never requests the current-price projection', async () => {
+    installApi([priceSource()])
+    const served = apiClient.get
+    const requested: string[] = []
+    apiClient.get = async (url, config) => {
+      requested.push(url)
+      return served(url, config)
+    }
+
+    renderPanel()
+
+    await rowOf('Vercel gateway cost')
+    await waitFor(() =>
+      expect(requested).toContain('/api/upstream-price-sources/alerts')
+    )
+    expect(requested).not.toContain('/api/upstream-prices/current')
   })
 
   test('labels a source whose configuration changed after its last successful run', async () => {

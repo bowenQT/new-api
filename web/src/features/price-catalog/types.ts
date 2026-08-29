@@ -181,48 +181,9 @@ export interface PriceAlert {
   params?: PriceAlertParams
 }
 
-/** `dto.UpstreamCurrentPriceEntry` */
-export interface CurrentPriceEntry {
-  source_id: number
-  source_name: string
-  role: PriceRole
-  scope: PriceScope
-  channel_id?: number
-  source_model_name: string
-  canonical_model_name?: string
-  mapping_status?: string
-  provider?: string
-  currency?: string
-  formula_kind?: string
-  price_expr?: string
-  expr_version?: string
-  effective_at?: number
-  fetched_at?: number
-  last_seen_at?: number
-  fingerprint?: string
-  snapshot_id?: number
-  run_id: number
-  run_finished_at?: number
-  status: string
-  warning_code?: string
-  stale: boolean
-  orphaned: boolean
-  varies_by_provider: boolean
-  canonical_conflict: boolean
-  /**
-   * The run behind this observation executed under a different source
-   * configuration than the source carries now (spec §7.3, §9.2). The price is
-   * still shown as evidence, but it is not a confirmed current cost until the
-   * source syncs again.
-   */
-  source_config_changed: boolean
-  metadata?: Record<string, string>
-}
-
-/** `dto.UpstreamCurrentPriceResponse` */
-export interface CurrentPriceResponse {
+/** `dto.UpstreamPriceSourceAlertsResponse` */
+export interface SourceAlertsResponse {
   generated_at: number
-  entries: CurrentPriceEntry[] | null
   alerts: PriceAlert[] | null
 }
 
