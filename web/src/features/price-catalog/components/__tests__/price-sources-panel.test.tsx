@@ -28,14 +28,16 @@ import { afterEach, describe, expect, test } from 'vitest'
 
 import { api } from '@/lib/api'
 
+import { priceCatalogQueryKeys } from '../../constants'
 import type { PriceAlert, PriceSourceView } from '../../types'
 import { PriceSourcesPanel } from '../price-sources-panel'
 
 type ApiMethod = (url: string, config?: unknown) => Promise<{ data: unknown }>
-type MockableApi = { get: ApiMethod }
+type MockableApi = { get: ApiMethod; put: ApiMethod }
 
 const apiClient = api as unknown as MockableApi
 const originalGet = apiClient.get
+const originalPut = apiClient.put
 let queryClient: QueryClient | null = null
 
 function priceSource(
@@ -115,6 +117,7 @@ async function rowOf(name: string): Promise<HTMLElement> {
 
 afterEach(() => {
   apiClient.get = originalGet
+  apiClient.put = originalPut
   queryClient?.clear()
   queryClient = null
 })
@@ -212,6 +215,26 @@ describe('price sources panel', () => {
     const row = within(await rowOf('Never finished'))
     expect(row.getByText('Never')).toBeInTheDocument()
     expect(row.queryByText(/^Run #/)).toBeNull()
+  })
+
+  // A comparison is derived from the sources, so a cached one is stale the
+  // moment a source changes.
+  test('invalidates the cached comparisons after a source is toggled', async () => {
+    installApi([priceSource()])
+    apiClient.put = async () => ({ data: { success: true } })
+
+    renderPanel()
+    const client = queryClient
+    if (!client) throw new Error('Expected a query client')
+    const compareKey = priceCatalogQueryKeys.compare('default', '1/1/0/0', '')
+    client.setQueryData(compareKey, { generated_at: 1, entries: [] })
+
+    const row = within(await rowOf('Vercel gateway cost'))
+    fireEvent.click(row.getByLabelText('Enabled'))
+
+    await waitFor(() =>
+      expect(client.getQueryState(compareKey)?.isInvalidated).toBe(true)
+    )
   })
 
   test('disables scheduling and refuses a commit for an orphaned source', async () => {

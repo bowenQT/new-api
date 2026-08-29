@@ -97,12 +97,18 @@ export function PriceSourcesPanel() {
     retry: false,
   })
 
+  // Creating, editing, enabling, disabling or syncing a source changes what a
+  // comparison would report, so the cached comparisons are dropped with the
+  // rest of the catalog rather than left showing costs from before the change.
   const invalidateCatalog = () => {
     void queryClient.invalidateQueries({
       queryKey: priceCatalogQueryKeys.sources,
     })
     void queryClient.invalidateQueries({
       queryKey: priceCatalogQueryKeys.currentPrices,
+    })
+    void queryClient.invalidateQueries({
+      queryKey: priceCatalogQueryKeys.compareAll,
     })
   }
 

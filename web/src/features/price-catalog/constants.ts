@@ -165,12 +165,20 @@ export const EXCLUDED_FACTOR_LABEL_KEYS: Record<string, string> = {
   upstream_usage_semantic_differences: 'Upstream usage semantic differences',
 }
 
+/**
+ * Prefix of every comparison query. A comparison is derived from the sources,
+ * so any source mutation invalidates all of them at once, whatever group,
+ * usage vector or model filter they were requested with.
+ */
+const COMPARE_QUERY_KEY = ['price-catalog', 'compare'] as const
+
 export const priceCatalogQueryKeys = {
   sources: ['price-catalog', 'sources'] as const,
   adapters: ['price-catalog', 'adapters'] as const,
   currentPrices: ['price-catalog', 'current-prices'] as const,
+  compareAll: COMPARE_QUERY_KEY,
   compare: (group: string, usageKey: string, modelsKey: string) =>
-    ['price-catalog', 'compare', group, usageKey, modelsKey] as const,
+    [...COMPARE_QUERY_KEY, group, usageKey, modelsKey] as const,
   groups: ['price-catalog', 'groups'] as const,
   channels: ['price-catalog', 'channels'] as const,
 }
