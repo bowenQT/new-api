@@ -168,21 +168,21 @@ func TestProjectSalePriceModes(t *testing.T) {
 			wantMode:  SaleBillingModeRatio,
 			// (1e6 + 0.5e6*0.1 + 1e6*4) * 1.5 / 500000
 			wantStatus: ProjectionOK,
-			wantAmount: floatPtr((1_000_000 + 500_000*0.1 + 1_000_000*4) * 1.5 / common.QuotaPerUnit),
+			wantAmount: float64Ptr((1_000_000 + 500_000*0.1 + 1_000_000*4) * 1.5 / common.QuotaPerUnit),
 		},
 		{
 			name:       "per-call model price is the USD amount",
 			modelName:  "per-call-model",
 			wantMode:   SaleBillingModePerCall,
 			wantStatus: ProjectionOK,
-			wantAmount: floatPtr(0.04),
+			wantAmount: float64Ptr(0.04),
 		},
 		{
 			name:       "tiered expression divides by one million",
 			modelName:  "tiered-model",
 			wantMode:   SaleBillingModeTieredExpr,
 			wantStatus: ProjectionOK,
-			wantAmount: floatPtr((1_000_000*3 + 1_000_000*15) / 1_000_000),
+			wantAmount: float64Ptr((1_000_000*3 + 1_000_000*15) / 1_000_000),
 		},
 		{
 			name:       "request rules fail closed",
@@ -353,10 +353,6 @@ func TestCompareUpstreamPricesGroupSelection(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, unknownGroup.GroupRatioConfigured)
 	assert.Equal(t, float64(1), unknownGroup.GroupRatio)
-}
-
-func floatPtr(value float64) *float64 {
-	return &value
 }
 
 // TestCompareUpstreamPricesStaleAlertBasis pins the comparison's alerting

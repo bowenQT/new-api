@@ -4,7 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -73,27 +74,40 @@ func checkDecimalShape(value string) error {
 	return nil
 }
 
+// parseBoundedDecimal is the single parse of a source-provided amount: bounds
+// and shape are enforced before the arbitrary-precision parser sees the input,
+// and negative amounts are refused. Callers that need to compare the value
+// against a ceiling use the returned decimal rather than reparsing the
+// canonical string it renders to.
+func parseBoundedDecimal(value string) (decimal.Decimal, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return decimal.Decimal{}, fmt.Errorf("empty decimal string")
+	}
+	if len(trimmed) > maxDecimalStringLength {
+		return decimal.Decimal{}, fmt.Errorf("decimal string exceeds %d characters", maxDecimalStringLength)
+	}
+	if err := checkDecimalShape(trimmed); err != nil {
+		return decimal.Decimal{}, err
+	}
+	parsed, err := decimal.NewFromString(trimmed)
+	if err != nil {
+		return decimal.Decimal{}, fmt.Errorf("invalid decimal string %q: %w", value, err)
+	}
+	if parsed.IsNegative() {
+		return decimal.Decimal{}, fmt.Errorf("negative price %q rejected", value)
+	}
+	return parsed, nil
+}
+
 // NormalizeDecimalString parses a decimal amount string and returns its
 // canonical representation. Negative amounts, exponent notation, oversized
 // digit counts, and non-decimal input (including NaN/Inf spellings) are
 // rejected before parsing.
 func NormalizeDecimalString(value string) (string, error) {
-	trimmed := strings.TrimSpace(value)
-	if trimmed == "" {
-		return "", fmt.Errorf("empty decimal string")
-	}
-	if len(trimmed) > maxDecimalStringLength {
-		return "", fmt.Errorf("decimal string exceeds %d characters", maxDecimalStringLength)
-	}
-	if err := checkDecimalShape(trimmed); err != nil {
-		return "", err
-	}
-	parsed, err := decimal.NewFromString(trimmed)
+	parsed, err := parseBoundedDecimal(value)
 	if err != nil {
-		return "", fmt.Errorf("invalid decimal string %q: %w", value, err)
-	}
-	if parsed.IsNegative() {
-		return "", fmt.Errorf("negative price %q rejected", value)
+		return "", err
 	}
 	return parsed.String(), nil
 }
@@ -106,13 +120,9 @@ var maxPerTokenPriceUSD = decimal.NewFromInt(1)
 // USD-per-1M-tokens coefficient used by token_expr_v1 expressions. The
 // conversion shifts the decimal exponent, so no float rounding is involved.
 func PerMillionTokenCoefficient(perTokenCost string) (string, error) {
-	normalized, err := NormalizeDecimalString(perTokenCost)
+	parsed, err := parseBoundedDecimal(perTokenCost)
 	if err != nil {
 		return "", err
-	}
-	parsed, err := decimal.NewFromString(normalized)
-	if err != nil {
-		return "", fmt.Errorf("invalid decimal string %q: %w", perTokenCost, err)
 	}
 	if parsed.GreaterThan(maxPerTokenPriceUSD) {
 		return "", fmt.Errorf("per-token price %q exceeds 1 USD and is rejected", perTokenCost)
@@ -129,31 +139,14 @@ var maxPerMillionTokenPriceUSD = decimal.NewFromInt(1_000_000)
 // USD per 1M tokens and returns its canonical decimal string. Sources quoting
 // USD per token must use PerMillionTokenCoefficient instead.
 func MillionTokenCoefficient(perMillionCost string) (string, error) {
-	normalized, err := NormalizeDecimalString(perMillionCost)
+	parsed, err := parseBoundedDecimal(perMillionCost)
 	if err != nil {
 		return "", err
-	}
-	parsed, err := decimal.NewFromString(normalized)
-	if err != nil {
-		return "", fmt.Errorf("invalid decimal string %q: %w", perMillionCost, err)
 	}
 	if parsed.GreaterThan(maxPerMillionTokenPriceUSD) {
 		return "", fmt.Errorf("per-1M-token price %q exceeds %s USD and is rejected", perMillionCost, maxPerMillionTokenPriceUSD.String())
 	}
-	return normalized, nil
-}
-
-// truncateUTF8 cuts a string to at most max bytes without splitting a UTF-8
-// sequence.
-func truncateUTF8(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	cut := max
-	for cut > 0 && s[cut]&0xC0 == 0x80 {
-		cut--
-	}
-	return s[:cut]
+	return parsed.String(), nil
 }
 
 // MapCanonicalModelName resolves the unified model name (spec §7.5): an
@@ -291,11 +284,7 @@ func sortedMetadata(metadata map[string]string) []fingerprintMetadataEntry {
 	if len(metadata) == 0 {
 		return []fingerprintMetadataEntry{}
 	}
-	keys := make([]string, 0, len(metadata))
-	for key := range metadata {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(metadata))
 	entries := make([]fingerprintMetadataEntry, 0, len(keys))
 	for _, key := range keys {
 		entries = append(entries, fingerprintMetadataEntry{Key: key, Value: metadata[key]})

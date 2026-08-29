@@ -26,7 +26,11 @@ type UpstreamPriceSourceRequest struct {
 	Settings                *string `json:"settings"`
 }
 
-const maxSourceSettingsBytes = 65535
+// MaxSourceSettingsBytes caps the settings JSON a source may carry, both as the
+// client sends it and after the service re-serializes it into its canonical
+// form. It is declared here because the request shape is where the limit is
+// first enforced.
+const MaxSourceSettingsBytes = 65535
 
 func (r *UpstreamPriceSourceRequest) Validate() error {
 	if strings.TrimSpace(r.Name) == "" {
@@ -53,7 +57,7 @@ func (r *UpstreamPriceSourceRequest) Validate() error {
 	if r.ScheduleIntervalSeconds != nil && *r.ScheduleIntervalSeconds < 0 {
 		return errors.New("schedule_interval_seconds must not be negative")
 	}
-	if r.Settings != nil && len(*r.Settings) > maxSourceSettingsBytes {
+	if r.Settings != nil && len(*r.Settings) > MaxSourceSettingsBytes {
 		return errors.New("settings too large")
 	}
 	return nil

@@ -3,8 +3,9 @@ package upstreamprice
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"math"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -307,7 +308,7 @@ func selectCompareModels(requested []string, modelFilter string, pricesByModel m
 		}
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	total := len(names)
 	if total > MaxCompareModels {
 		return names[:MaxCompareModels], total, true
@@ -381,12 +382,10 @@ func buildCompareEntry(modelName string, catalogEntries []dto.UpstreamCurrentPri
 		if price.UsableForMargin && price.AmountUSD != nil {
 			amount := *price.AmountUSD
 			if minCost == nil || amount < *minCost {
-				value := amount
-				minCost = &value
+				minCost = common.GetPointer(amount)
 			}
 			if maxCost == nil || amount > *maxCost {
-				value := amount
-				maxCost = &value
+				maxCost = common.GetPointer(amount)
 			}
 			if price.Stale || price.VariesByProvider || price.Orphaned || price.CanonicalConflict {
 				entry.CostConfirmed = false
@@ -420,17 +419,8 @@ func buildCompareEntry(modelName string, catalogEntries []dto.UpstreamCurrentPri
 		}
 	}
 
-	entry.Statuses = sortedStatusList(statuses)
+	entry.Statuses = slices.Sorted(maps.Keys(statuses))
 	return entry
-}
-
-func sortedStatusList(statuses map[string]bool) []string {
-	list := make([]string, 0, len(statuses))
-	for status := range statuses {
-		list = append(list, status)
-	}
-	sort.Strings(list)
-	return list
 }
 
 // projectCatalogEntry converts one catalog row into a projected USD amount

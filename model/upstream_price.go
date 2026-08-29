@@ -366,25 +366,21 @@ type PriceSyncCommit struct {
 	Items                  []PriceSyncCommitItem
 }
 
-func intPtrEqual(a, b *int) bool {
+// IntPtrEqual compares two optional ints, treating "both absent" as equal. The
+// price sync CAS checks compare optional base run ids with it, at commit time
+// and again when a preview token is redeemed, so both sides must answer the
+// absent case identically.
+func IntPtrEqual(a, b *int) bool {
 	if a == nil || b == nil {
 		return a == nil && b == nil
 	}
 	return *a == *b
 }
 
-// truncateSummary caps an error summary at 255 bytes without splitting a
-// UTF-8 sequence.
+// truncateSummary caps an error summary at the width of its column.
 func truncateSummary(s string) string {
 	const maxSummaryBytes = 255
-	if len(s) <= maxSummaryBytes {
-		return s
-	}
-	cut := maxSummaryBytes
-	for cut > 0 && s[cut]&0xC0 == 0x80 {
-		cut--
-	}
-	return s[:cut]
+	return common.TruncateUTF8(s, maxSummaryBytes)
 }
 
 // CommitPriceSync writes one sync run, its items, and (for non-failed runs)
@@ -409,7 +405,7 @@ func CommitPriceSync(commit *PriceSyncCommit) (*PriceSyncRun, error) {
 		if source.ConfigRevision != commit.ExpectedConfigRevision {
 			return ErrPriceSyncConflict
 		}
-		if !intPtrEqual(source.LastSuccessRunId, commit.ExpectedBaseRunId) {
+		if !IntPtrEqual(source.LastSuccessRunId, commit.ExpectedBaseRunId) {
 			return ErrPriceSyncConflict
 		}
 		// Authoritative orphan/disabled-channel check inside the locked

@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -238,13 +239,7 @@ func signPreviewClaim(claim previewClaim) (string, error) {
 }
 
 func verifyPreviewToken(token string, now time.Time) (*previewClaim, error) {
-	dot := -1
-	for i := range token {
-		if token[i] == '.' {
-			dot = i
-			break
-		}
-	}
+	dot := strings.IndexByte(token, '.')
 	if dot <= 0 || dot == len(token)-1 {
 		return nil, errors.New("malformed preview token")
 	}
@@ -296,7 +291,7 @@ func boundSourceModelIdentity(name string) (string, bool) {
 		return name, false
 	}
 	digest := sha256.Sum256([]byte(name))
-	return truncateUTF8(name, 200) + "#" + hex.EncodeToString(digest[:6]), true
+	return common.TruncateUTF8(name, 200) + "#" + hex.EncodeToString(digest[:6]), true
 }
 
 type plannedItem struct {
@@ -910,7 +905,7 @@ func SyncPriceSource(ctx context.Context, sourceId int, previewToken string) (*d
 	if planErr != nil {
 		return nil, recordSyncPlanFailure(ctx, source, plan, planErr)
 	}
-	if !intPtrEqual(claim.BaseRunId, plan.BaseRunId) {
+	if !model.IntPtrEqual(claim.BaseRunId, plan.BaseRunId) {
 		return nil, model.ErrPriceSyncConflict
 	}
 	if claim.GateThreshold != strconv.FormatFloat(plan.GateThreshold, 'f', -1, 64) {
@@ -1101,7 +1096,7 @@ func buildRunFromPlan(plan *syncPlan, errorSummary string) model.PriceSyncRun {
 		SourceConfigRevision: plan.Source.ConfigRevision,
 		ResponseBytes:        plan.Meta.ResponseBytes,
 		SourceConfigDigest:   sourceConfigDigest(plan.Source),
-		SourceRevision:       truncateUTF8(plan.Meta.SourceRevision, MaxSourceRevisionLength),
+		SourceRevision:       common.TruncateUTF8(plan.Meta.SourceRevision, MaxSourceRevisionLength),
 		DiscoveredCount:      plan.Meta.Discovered,
 		ValidCount:           plan.ValidCount,
 		UnsupportedCount:     plan.UnsupportedCount,
@@ -1242,11 +1237,4 @@ func IsPriceSourceOrphaned(source *model.PriceSource) (bool, error) {
 		return true, nil
 	}
 	return false, err
-}
-
-func intPtrEqual(a, b *int) bool {
-	if a == nil || b == nil {
-		return a == nil && b == nil
-	}
-	return *a == *b
 }

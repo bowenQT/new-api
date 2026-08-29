@@ -189,8 +189,7 @@ func evaluatePriceJump(previous *model.PriceSnapshot, current *NormalizedPrice, 
 			FromZero:           fromZero,
 		}
 		if !fromZero {
-			value := rate
-			entry.ChangeRate = &value
+			entry.ChangeRate = common.GetPointer(rate)
 		}
 		entries = keepWorstPerDimension(entries, entry)
 	}
