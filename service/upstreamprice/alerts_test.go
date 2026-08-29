@@ -174,3 +174,67 @@ func TestEvaluateSourceAlertsCoverageDropOnRefusedRun(t *testing.T) {
 	require.NotNil(t, coverage.Params.GateRefused)
 	assert.True(t, *coverage.Params.GateRefused)
 }
+
+// TestListSourceAlertsMatchesCatalogProjection locks the contract the
+// source-alerts endpoint exists for: it is the same evaluation the catalog
+// projection appends to its own response, only without the projection. The two
+// must stay item-for-item equal, or the sources page and the catalog page would
+// disagree about the health of the same catalog.
+func TestListSourceAlertsMatchesCatalogProjection(t *testing.T) {
+	db := setupCompareTestDB(t)
+	now := common.GetTimestamp()
+
+	// A cost source that is stale, lost most of its coverage between its last
+	// two successful runs, and was repointed at another channel afterwards.
+	channelId := 1
+	require.NoError(t, db.Create(&model.Channel{Id: channelId, Name: "cost-channel"}).Error)
+	otherChannelId := channelId + 1
+	require.NoError(t, db.Create(&model.Channel{Id: otherChannelId, Name: "other-channel"}).Error)
+	degraded := &model.PriceSource{
+		Name:       "degraded-cost-source",
+		AdapterKey: "test_adapter",
+		Role:       string(RoleSupplierCost),
+		Scope:      string(ScopePublic),
+		ChannelId:  &channelId,
+		Enabled:    true,
+		Settings:   `{"stale_threshold_seconds":3600}`,
+	}
+	require.NoError(t, model.InsertPriceSource(degraded))
+	createAlertTestRun(t, db, degraded.Id, model.PriceSyncRunStatusSucceeded, 100, now-7200)
+	latest := createAlertTestRun(t, db, degraded.Id, model.PriceSyncRunStatusSucceeded, 20, now-7200)
+	require.NoError(t, db.Model(&model.PriceSource{}).Where("id = ?", degraded.Id).
+		Updates(map[string]any{"last_success_run_id": latest.Id, "channel_id": otherChannelId}).Error)
+
+	// A second source with three trailing failures, so the comparison covers
+	// more than one source and more than one alert code.
+	failing := &model.PriceSource{
+		Name:       "failing-reference-source",
+		AdapterKey: "test_adapter",
+		Role:       string(RoleCuratedReference),
+		Scope:      string(ScopePublic),
+		Enabled:    true,
+	}
+	require.NoError(t, model.InsertPriceSource(failing))
+	for i := 0; i < ConsecutiveFailureAlertThreshold; i++ {
+		createAlertTestRun(t, db, failing.Id, model.PriceSyncRunStatusFailed, 0, now)
+	}
+
+	response, err := ListSourceAlerts()
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	catalog, err := GetCurrentUpstreamPrices(nil)
+	require.NoError(t, err)
+
+	codes := make([]string, 0, len(response.Alerts))
+	for _, alert := range response.Alerts {
+		codes = append(codes, alert.Code)
+	}
+	assert.ElementsMatch(t, []string{
+		AlertSourceStale,
+		AlertCoverageDrop,
+		AlertSourceConfigChanged,
+		AlertSourceConsecutiveFailures,
+	}, codes, "the fixture must exercise every source-level alert code")
+	assert.Equal(t, catalog.Alerts, response.Alerts)
+	assert.Positive(t, response.GeneratedAt)
+}

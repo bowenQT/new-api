@@ -114,6 +114,7 @@ func TestUpstreamPriceRoutesRootOnly(t *testing.T) {
 	}{
 		{http.MethodGet, "/api/upstream-price-sources"},
 		{http.MethodGet, "/api/upstream-price-sources/adapters"},
+		{http.MethodGet, "/api/upstream-price-sources/alerts"},
 		{http.MethodPost, "/api/upstream-price-sources"},
 		{http.MethodPut, "/api/upstream-price-sources/999999"},
 		{http.MethodPost, "/api/upstream-price-sources/999999/preview"},
