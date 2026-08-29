@@ -1,10 +1,12 @@
 package model
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
@@ -12,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 func setupUpstreamPriceDB(t *testing.T) *gorm.DB {
@@ -334,8 +337,8 @@ func TestCommitPriceSyncCASConflicts(t *testing.T) {
 // depends on when it shows the last observed price of a model a source stopped
 // returning: run id is the ordering authority, so the highest last_seen_run_id
 // wins and the lowest snapshot id breaks a tie between rows that share it. A
-// model with no snapshot at all is absent rather than an error, and the whole
-// lookup stays a bounded number of queries instead of one per model.
+// model with no snapshot at all is absent rather than an error, and a batch of
+// models costs one statement instead of one query per model.
 func TestGetLatestPriceSnapshotsForModelsSelection(t *testing.T) {
 	db := setupUpstreamPriceDB(t)
 	source := testPriceSource(t)
@@ -363,8 +366,8 @@ func TestGetLatestPriceSnapshotsForModelsSelection(t *testing.T) {
 			snapshotQueries++
 		}
 	}
-	// The aggregate step runs through Scan, which is a row callback, while the
-	// row step runs through Find; both have to be counted.
+	// Count both the query and the row callback so an aggregate step run through
+	// Scan would be seen too, not only the Find.
 	require.NoError(t, db.Callback().Query().After("gorm:query").Register("test:count_price_snapshots", countSnapshotQuery))
 	require.NoError(t, db.Callback().Row().After("gorm:row").Register("test:count_price_snapshots", countSnapshotQuery))
 	t.Cleanup(func() {
@@ -386,14 +389,14 @@ func TestGetLatestPriceSnapshotsForModelsSelection(t *testing.T) {
 	assert.Equal(t, onlyC, latest["openai/model-c"].Id)
 	assert.NotContains(t, latest, "openai/never-observed")
 
-	assert.Equal(t, 2, snapshotQueries,
-		"four models must cost one aggregate query plus one row query, not one query per model")
+	assert.Equal(t, 1, snapshotQueries,
+		"a batch of models must be resolved by one statement, not by an aggregate step plus a row step")
 
 	// An empty request never touches the database.
 	empty, err := GetLatestPriceSnapshotsForModels(source.Id, nil)
 	require.NoError(t, err)
 	assert.Empty(t, empty)
-	assert.Equal(t, 2, snapshotQueries)
+	assert.Equal(t, 1, snapshotQueries)
 
 	// The batched lookup must land on the same rows as the per-model query it
 	// replaced, tie-break included.
@@ -404,6 +407,74 @@ func TestGetLatestPriceSnapshotsForModelsSelection(t *testing.T) {
 			First(reference).Error)
 		assert.Equal(t, reference.Id, latest[sourceModelName].Id, sourceModelName)
 	}
+}
+
+// afterFirstSnapshotRead runs one action immediately after the first completed
+// statement that read price_snapshots. GORM traces a statement through the
+// logger only once its rows have been scanned and closed, so an action placed
+// here lands strictly between two statements of the same lookup — the exact
+// interleaving a concurrent commit produces, with no second goroutine, no
+// sleep, and no timing assumption. Statements the action itself issues are past
+// the one-shot guard and never recurse.
+type afterFirstSnapshotRead struct {
+	gormlogger.Interface
+	injected bool
+	run      func()
+}
+
+func (a *afterFirstSnapshotRead) Trace(ctx context.Context, begin time.Time, fc func() (string, int64), err error) {
+	if a.injected {
+		return
+	}
+	sql, _ := fc()
+	if !strings.Contains(sql, "price_snapshots") {
+		return
+	}
+	a.injected = true
+	a.run()
+}
+
+// TestGetLatestPriceSnapshotsForModelsSurvivesIdempotentHit pins that a
+// fingerprint-idempotent hit landing while the lookup runs can never make a
+// model vanish from the catalog.
+//
+// upsertPriceSnapshot advances last_seen_run_id on an idempotent hit, so a
+// concurrent commit can move the very row this lookup is resolving. The
+// interleaving is injected deterministically: the advance is applied the moment
+// the lookup's first read of price_snapshots returns. A lookup that first
+// collects each model's highest run id and then fetches the rows at those exact
+// (model, run id) pairs would search for a run id the row no longer carries and
+// return nothing, dropping both the model name and its last observed price.
+func TestGetLatestPriceSnapshotsForModelsSurvivesIdempotentHit(t *testing.T) {
+	db := setupUpstreamPriceDB(t)
+	source := testPriceSource(t)
+
+	snapshot := testSnapshot(source.Id, "openai/model-a", fingerprintA, "p * 1")
+	snapshot.LastSeenRunId = 10
+	require.NoError(t, db.Create(snapshot).Error)
+
+	injector := &afterFirstSnapshotRead{run: func() {
+		require.NoError(t, DB.Model(&PriceSnapshot{}).
+			Where("id = ?", snapshot.Id).
+			Updates(map[string]interface{}{"last_seen_at": int64(2), "last_seen_run_id": 11}).Error)
+	}}
+	previousLogger := db.Config.Logger
+	db.Config.Logger = injector
+	t.Cleanup(func() { db.Config.Logger = previousLogger })
+
+	latest, err := GetLatestPriceSnapshotsForModels(source.Id, []string{"openai/model-a"})
+	require.NoError(t, err)
+	require.True(t, injector.injected, "the interleaving under test was never injected")
+	require.NotNil(t, latest["openai/model-a"], "an idempotent hit must not drop the model from the lookup")
+	assert.Equal(t, snapshot.Id, latest["openai/model-a"].Id)
+
+	// The row the lookup returned is still the winning observation after the
+	// advance, so a repeated lookup agrees with it.
+	after, err := GetLatestPriceSnapshotsForModels(source.Id, []string{"openai/model-a"})
+	require.NoError(t, err)
+	require.NotNil(t, after["openai/model-a"])
+	assert.Equal(t, snapshot.Id, after["openai/model-a"].Id)
+	assert.Equal(t, 11, after["openai/model-a"].LastSeenRunId)
 }
 
 func TestUpdatePriceSourceCASBumpsRevision(t *testing.T) {

@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 
@@ -287,9 +286,18 @@ const priceSnapshotLookupBatchSize = 200
 // last_seen_run_id wins, and the lowest snapshot id breaks a tie between rows
 // that share it. Models with no snapshot at all are absent from the result.
 //
-// The lookup is deliberately two steps — first each model's highest run id,
-// then only the rows at those exact (model, run) pairs — so a model with a long
-// observation history never loads that history into memory.
+// Each batch of models is resolved by one statement that asks for the rows no
+// better row exists for, rather than by a GROUP BY of every model's highest run
+// id followed by a lookup of those exact (model, run id) pairs. Two statements
+// leave a window a concurrent sync can fall into: upsertPriceSnapshot advances
+// last_seen_run_id on a fingerprint-idempotent hit, so a commit landing between
+// the two makes the second statement look for a run id the row no longer
+// carries, and the model silently disappears from the catalog — losing both its
+// name and its last observed price. One statement always observes a row either
+// before or after that write. The predicate is plain correlated NOT EXISTS with
+// no reserved-word column and no dialect-specific function, so it runs
+// unchanged on SQLite, MySQL, and PostgreSQL, and it reads the same
+// (source_id, source_model_name) index prefix the identity unique key provides.
 func GetLatestPriceSnapshotsForModels(sourceId int, sourceModelNames []string) (map[string]*PriceSnapshot, error) {
 	names := make([]string, 0, len(sourceModelNames))
 	seen := make(map[string]bool, len(sourceModelNames))
@@ -304,49 +312,33 @@ func GetLatestPriceSnapshotsForModels(sourceId int, sourceModelNames []string) (
 		return nil, nil
 	}
 
-	type latestObservation struct {
-		SourceModelName  string
-		MaxLastSeenRunId int
-	}
-	observations := make([]latestObservation, 0, len(names))
+	latest := make(map[string]*PriceSnapshot, len(names))
 	for batch := range slices.Chunk(names, priceSnapshotLookupBatchSize) {
-		var rows []latestObservation
-		if err := DB.Model(&PriceSnapshot{}).
-			Select("source_model_name, MAX(last_seen_run_id) AS max_last_seen_run_id").
-			Where("source_id = ? AND source_model_name IN ?", sourceId, batch).
-			Group("source_model_name").
-			Scan(&rows).Error; err != nil {
-			return nil, err
-		}
-		observations = append(observations, rows...)
-	}
-
-	latest := make(map[string]*PriceSnapshot, len(observations))
-	for batch := range slices.Chunk(observations, priceSnapshotLookupBatchSize) {
-		conditions := make([]string, 0, len(batch))
-		args := make([]interface{}, 0, len(batch)*2)
-		for _, observation := range batch {
-			conditions = append(conditions, "(source_model_name = ? AND last_seen_run_id = ?)")
-			args = append(args, observation.SourceModelName, observation.MaxLastSeenRunId)
-		}
 		var snapshots []*PriceSnapshot
-		if err := DB.Where("source_id = ?", sourceId).
-			Where("("+strings.Join(conditions, " OR ")+")", args...).
-			Order("id asc").
+		if err := DB.Where("source_id = ? AND source_model_name IN ?", sourceId, batch).
+			Where(latestPriceSnapshotPredicate).
 			Find(&snapshots).Error; err != nil {
 			return nil, err
 		}
-		// Every model appears in exactly one pair, and the rows come back by
-		// ascending id, so the first row of a model is the lowest id among the
-		// rows sharing its highest run id.
 		for _, snapshot := range snapshots {
-			if _, ok := latest[snapshot.SourceModelName]; !ok {
-				latest[snapshot.SourceModelName] = snapshot
-			}
+			latest[snapshot.SourceModelName] = snapshot
 		}
 	}
 	return latest, nil
 }
+
+// latestPriceSnapshotPredicate keeps only the winning observation of each
+// (source_id, source_model_name): the row for which no row of the same identity
+// has a higher last_seen_run_id, or the same run id and a lower snapshot id.
+// Exactly one row of each model satisfies it, so the caller needs no ordering
+// and no per-model deduplication.
+const latestPriceSnapshotPredicate = `NOT EXISTS (
+	SELECT 1 FROM price_snapshots better
+	WHERE better.source_id = price_snapshots.source_id
+	  AND better.source_model_name = price_snapshots.source_model_name
+	  AND (better.last_seen_run_id > price_snapshots.last_seen_run_id
+	       OR (better.last_seen_run_id = price_snapshots.last_seen_run_id
+	           AND better.id < price_snapshots.id)))`
 
 // PriceSyncCommitItem is one prepared run item. Snapshot is only set for
 // status=valid items on runs that will persist snapshots.
