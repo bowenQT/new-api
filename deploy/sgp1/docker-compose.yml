@@ -9,7 +9,7 @@ services:
     ports:
       - "127.0.0.1:${APP_PORT:-3000}:3000"
     environment:
-      SQL_DSN: postgresql://newapi:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/sgp1/.env}@postgres:5432/newapi?sslmode=disable
+      SQL_DSN: ${SQL_DSN:?set SQL_DSN in deploy/sgp1/.env}
       REDIS_CONN_STRING: redis://default:${REDIS_PASSWORD:?set REDIS_PASSWORD in deploy/sgp1/.env}@redis:6379/0
       SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in deploy/sgp1/.env}
       CRYPTO_SECRET: ${CRYPTO_SECRET:?set CRYPTO_SECRET in deploy/sgp1/.env}
@@ -33,12 +33,11 @@ services:
     volumes:
       - new_api_data:/data
       - new_api_logs:/app/logs
+      - ${MANAGED_POSTGRES_CA_CERT_PATH:?set MANAGED_POSTGRES_CA_CERT_PATH in deploy/sgp1/.env}:/etc/new-api/db/ca-certificate.crt:ro
     networks:
       - default
       - tunnel
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:

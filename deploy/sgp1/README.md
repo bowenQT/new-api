@@ -1,15 +1,19 @@
 # SGP1 single-node deployment
 
-This deployment runs New API, PostgreSQL, Redis, and Cloudflare Tunnel on one
-Droplet. The application listens on `127.0.0.1:3000`; PostgreSQL and Redis are
-not published to the host network. Cloudflare Tunnel reaches New API through a
+This deployment runs New API, Redis, a local rollback PostgreSQL instance, and
+Cloudflare Tunnel on one Droplet. New API connects to DigitalOcean Managed
+PostgreSQL over the SGP1 VPC with certificate verification. The application
+listens on `127.0.0.1:3000`; the local PostgreSQL and Redis services are not
+published to the host network. Cloudflare Tunnel reaches New API through a
 dedicated Docker network, so no public HTTP port is required on the Droplet.
 
 ## Start
 
 Create `deploy/sgp1/.env` from `.env.example`, set `NEW_API_IMAGE_TAG` to the
 full 40-character SHA of the reviewed commit, replace every secret with a unique
-random value, set the exact HTTPS origins, add the remotely managed Cloudflare
+random value, set `SQL_DSN` to the private managed PostgreSQL connection string,
+set `MANAGED_POSTGRES_CA_CERT_PATH` to the absolute host path of its CA
+certificate, set the exact HTTPS origins, add the remotely managed Cloudflare
 Tunnel token, then run from the repository root:
 
 ```bash
@@ -42,10 +46,11 @@ contract](../../docs/downstream/sgp1-operations.md). Fetch
 its full SHA as `NEW_API_IMAGE_TAG`; do not continue tracking the historical
 `deploy/sgp1` branch.
 
-Back up PostgreSQL before an update because the master node runs database
-migrations. Store the dump outside the Git worktree in a permission-restricted
-directory, record its checksum, and complete the restore rehearsal required by
-the operations contract.
+Back up managed PostgreSQL before an update because the master node runs
+database migrations. Store the dump outside the Git worktree in a
+permission-restricted directory, record its checksum, and complete the restore
+rehearsal required by the operations contract. The local PostgreSQL service and
+volume remain available only for the explicitly bounded rollback window.
 
 ```bash
 (
@@ -69,11 +74,15 @@ the operations contract.
   trap 'rm -f -- "$partial_path" "$checksum_partial"' EXIT
 
   umask 077
-  docker compose --env-file deploy/sgp1/.env \
-    -f deploy/sgp1/docker-compose.yml exec -T postgres \
-    pg_dump -U newapi -d newapi -Fc > "$partial_path"
-  docker compose --env-file deploy/sgp1/.env \
-    -f deploy/sgp1/docker-compose.yml exec -T postgres \
+  sql_dsn=$(sed -n 's/^SQL_DSN=//p' deploy/sgp1/.env)
+  ca_cert_path=$(sed -n 's/^MANAGED_POSTGRES_CA_CERT_PATH=//p' deploy/sgp1/.env)
+  test -n "$sql_dsn"
+  test -f "$ca_cert_path"
+  docker run --rm --network host \
+    -e SQL_DSN="$sql_dsn" \
+    -v "$ca_cert_path:/etc/new-api/db/ca-certificate.crt:ro" \
+    postgres:16-alpine sh -ec 'pg_dump "$SQL_DSN" -Fc' > "$partial_path"
+  docker run --rm -i postgres:16-alpine \
     pg_restore --list < "$partial_path" > /dev/null
   mv -- "$partial_path" "$backup_path"
   sha256sum "$backup_path" > "$checksum_partial"
