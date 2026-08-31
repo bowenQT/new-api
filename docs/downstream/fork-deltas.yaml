@@ -26,7 +26,7 @@ entries:
     status: active
     owner: downstream-maintainers
     introduced_commit: 09a424a230ef7f3c6c1ce01731822117cab63865
-    purpose: Run the downstream service on DigitalOcean SGP1 behind Cloudflare Tunnel.
+    purpose: Run the downstream service on DigitalOcean SGP1 behind Cloudflare Tunnel with private managed PostgreSQL and a local PostgreSQL rollback boundary.
     paths:
       - deploy/sgp1/.env.example
       - deploy/sgp1/README.md
