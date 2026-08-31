@@ -9,16 +9,27 @@ dedicated Docker network, so no public HTTP port is required on the Droplet.
 
 ## Start
 
-Create `deploy/sgp1/.env` from `.env.example`, set `NEW_API_IMAGE_TAG` to the
-full 40-character SHA of the reviewed commit, replace every secret with a unique
-random value, set `SQL_DSN` to the private managed PostgreSQL connection string,
-set `MANAGED_POSTGRES_CA_CERT_PATH` to the absolute host path of its CA
-certificate, set the exact HTTPS origins, add the remotely managed Cloudflare
-Tunnel token, then run from the repository root:
+Create `deploy/sgp1/.env` from `.env.example`, keep
+`NEW_API_IMAGE_REPOSITORY` on the reviewed private DigitalOcean Container
+Registry repository, set `NEW_API_IMAGE_TAG` to the full 40-character SHA of the
+reviewed commit, replace every secret with a unique random value, set `SQL_DSN`
+to the private managed PostgreSQL connection string, set
+`MANAGED_POSTGRES_CA_CERT_PATH` to the absolute host path of its CA certificate,
+set the exact HTTPS origins, and add the remotely managed Cloudflare Tunnel
+token.
+
+Install a read-only DigitalOcean Container Registry Docker configuration at
+`/etc/new-api/registry/docker-config-ro/config.json` with directory mode `0700`
+and file mode `0600`. The production Droplet must not retain registry write
+credentials. Pull the reviewed image before starting Compose:
 
 ```bash
+DOCKER_CONFIG=/etc/new-api/registry/docker-config-ro \
+  docker compose --env-file deploy/sgp1/.env \
+  -f deploy/sgp1/docker-compose.yml pull new-api
+
 docker compose --env-file deploy/sgp1/.env \
-  -f deploy/sgp1/docker-compose.yml up -d --build
+  -f deploy/sgp1/docker-compose.yml up -d --no-build
 ```
 
 Check the local health endpoint:
@@ -43,8 +54,10 @@ Tunnel container's fixed private address.
 Follow the [SGP1 release and rollback evidence
 contract](../../docs/downstream/sgp1-operations.md). Fetch
 `origin/downstream/main`, verify the reviewed commit is on that branch, and use
-its full SHA as `NEW_API_IMAGE_TAG`; do not continue tracking the historical
-`deploy/sgp1` branch.
+its full SHA as `NEW_API_IMAGE_TAG`. Resolve the matching image from the private
+DigitalOcean Container Registry with the read-only production credential; do
+not deploy an image that exists only in a builder's local cache, and do not
+continue tracking the historical `deploy/sgp1` branch.
 
 Back up managed PostgreSQL before an update because the master node runs
 database migrations. Store the dump outside the Git worktree in a

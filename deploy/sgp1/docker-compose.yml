@@ -3,7 +3,7 @@ services:
     build:
       context: ../..
       dockerfile: Dockerfile
-    image: bowenqt/new-api:${NEW_API_IMAGE_TAG:?set NEW_API_IMAGE_TAG in deploy/sgp1/.env}
+    image: ${NEW_API_IMAGE_REPOSITORY:?set NEW_API_IMAGE_REPOSITORY in deploy/sgp1/.env}:${NEW_API_IMAGE_TAG:?set NEW_API_IMAGE_TAG in deploy/sgp1/.env}
     restart: unless-stopped
     command: --log-dir /app/logs
     ports:
