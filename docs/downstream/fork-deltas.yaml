@@ -424,3 +424,25 @@ entries:
       - scripts/agent-runtime/verify.sh frontend
     removal_condition: Remove only if the upstream price catalog feature is retired or upstream ships an equivalent admin surface.
     upstream_reference: null
+
+  - id: ubicloud-x64-runners
+    status: active
+    owner: downstream-maintainers
+    introduced_commit: 2f2275db8c6aca6c99bb346c5ff19e9eccae8ba1
+    purpose: Run Linux x64 workflow jobs on Ubicloud-managed Ubuntu 24.04 with 4 vCPU and 16 GB memory while preserving ARM64, macOS, Windows, trigger gates, permissions, cache keys and release or deployment controls.
+    paths:
+      - .github/workflows/ci.yml
+      - .github/workflows/docker-build.yml
+      - .github/workflows/docker-image-branch.yml
+      - .github/workflows/electron-build.yml
+      - .github/workflows/release.yml
+      - .github/workflows/sync-release-to-gitcode.yml
+    upstream_touchpoints:
+      - Linux x64 runs-on values and native amd64 matrix runner values in the listed workflows.
+    conflict_risk: medium
+    verification:
+      - Exact-head content comparison limits workflow changes to Linux x64 labels; ARM64 and reusable external workflows remain unchanged.
+      - scripts/agent-runtime/verify.sh docs and exact-head CI on Ubicloud remain required before acceptance; they have not run for this candidate.
+      - Preflight and closeout are unverified because the available cloud shell cannot initialize its sandbox due to ENOSPC.
+    removal_condition: Remove if downstream Linux x64 jobs return to GitHub-hosted runners or upstream adopts the same reviewed Ubicloud routing.
+    upstream_reference: null
