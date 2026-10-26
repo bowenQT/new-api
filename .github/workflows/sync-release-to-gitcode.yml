@@ -25,7 +25,7 @@ jobs:
   prepare-release:
     name: Create or update GitCode release
     if: ${{ vars.GITCODE_REPOSITORY != '' }}
-    runs-on: ubuntu-latest
+    runs-on: ubicloud-standard-4-ubuntu-2404
     timeout-minutes: 90
     outputs:
       release_tag: ${{ steps.release.outputs.tag }}
